@@ -1,7 +1,7 @@
 {
-  "name": "Basketball Rotation Tracker",
-  "short_name": "Rotaciones",
-  "description": "App para gestionar rotaciones de jugadores de baloncesto",
+  "name": "PlayStats Basketball",
+  "short_name": "PlayStats",
+  "description": "App para gestionar rotaciones y estadísticas de baloncesto",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#111827",
