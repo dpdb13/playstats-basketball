@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head><title>Crear Iconos</title></head>
+<body>
+<canvas id="c192" width="192" height="192"></canvas>
+<canvas id="c512" width="512" height="512"></canvas>
+<script>
+function drawIcon(canvas, size) {
+  const ctx = canvas.getContext('2d');
+  // Fondo
+  ctx.fillStyle = '#111827';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, size, size, size * 0.16);
+  ctx.fill();
+  // Balón
+  const cx = size / 2, cy = size / 2, r = size * 0.31;
+  ctx.fillStyle = '#f97316';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  // Líneas del balón
+  ctx.strokeStyle = '#111827';
+  ctx.lineWidth = size * 0.02;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r);
+  ctx.lineTo(cx, cy + r);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - r, cy);
+  ctx.lineTo(cx + r, cy);
+  ctx.stroke();
+}
+drawIcon(document.getElementById('c192'), 192);
+drawIcon(document.getElementById('c512'), 512);
+// Instrucciones
+document.body.innerHTML += '<p>Click derecho en cada imagen → "Guardar imagen como" → icon-192.png / icon-512.png</p>';
+</script>
+</body>
+</html>
