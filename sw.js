@@ -1,4 +1,4 @@
-const CACHE_NAME = 'basketball-rotation-v1';
+const CACHE_NAME = 'basketball-rotation-v2';
 const urlsToCache = [
   '/',
   '/index.html'
@@ -29,8 +29,15 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Interceptar peticiones - Network first, luego cache
+// Interceptar peticiones - Network first para HTML, Cache first para assets
 self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+
+  // Peticiones a Supabase: siempre network, no cachear
+  if (url.hostname.includes('supabase')) {
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
