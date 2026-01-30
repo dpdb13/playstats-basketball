@@ -632,11 +632,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   ]);
 
   // Guardar y volver
-  const saveAndExit = useCallback(() => {
+  const saveAndExit = useCallback(async () => {
     saveState();
     const gameState = getFullGameState();
     gameState.status = 'in_progress';
-    if (onGameSaved) onGameSaved(gameState);
+    if (onGameSaved) await onGameSaved(gameState);
     setShowExitModal(false);
     if (onExit) {
       onExit();
@@ -648,11 +648,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   }, [saveState, getFullGameState, onExit, onGameSaved]);
 
   // Finalizar partido y volver
-  const finishGame = useCallback(() => {
+  const finishGame = useCallback(async () => {
     saveState();
     const gameState = getFullGameState();
     gameState.status = 'completed';
-    if (onGameSaved) onGameSaved(gameState);
+    if (onGameSaved) await onGameSaved(gameState);
 
     // Marcar como completado en localStorage legacy
     updateGameInList({

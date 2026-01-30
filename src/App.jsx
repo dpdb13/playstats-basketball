@@ -55,9 +55,9 @@ function AppContent() {
   }, [refreshCurrentTeam]);
 
   // Guardar partido en Supabase
-  const handleGameSaved = useCallback((gameState) => {
+  const handleGameSaved = useCallback(async (gameState) => {
     if (!currentTeam) return;
-    saveGame(gameState);
+    await saveGame(gameState);
   }, [currentTeam, saveGame]);
 
   // Pantalla de carga
