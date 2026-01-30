@@ -8,19 +8,17 @@ export default function PlayStatsIcon({ className = "w-8 h-8" }) {
       strokeLinejoin="round"
       className={className}
     >
-      {/* Tres barras de estadisticas */}
+      {/* Trofeo - copa */}
       <g strokeWidth="2">
-        <rect x="2" y="22" width="5" height="8" rx="1" />
-        <rect x="9" y="15" width="5" height="15" rx="1" />
-        <rect x="16" y="7" width="5" height="23" rx="1" />
+        <path d="M8,4 L24,4 L22,16 C21,20 11,20 10,16 Z" />
+        <path d="M8,6 C4,6 3,10 6,13 L10,13" />
+        <path d="M24,6 C28,6 29,10 26,13 L22,13" />
+        <line x1="16" y1="20" x2="16" y2="25" />
+        <path d="M11,25 L21,25 L22,28 L10,28 Z" />
       </g>
-
-      {/* Balon de baloncesto */}
+      {/* Estrella en el trofeo */}
       <g strokeWidth="1.2">
-        <circle cx="26" cy="6" r="5" />
-        <line x1="21" y1="6" x2="31" y2="6" />
-        <path d="M26,1 C23.5,3.5 23.5,8.5 26,11" />
-        <path d="M26,1 C28.5,3.5 28.5,8.5 26,11" />
+        <path d="M16,8 L17.2,11 L20.5,11 L18,13 L19,16 L16,14 L13,16 L14,13 L11.5,11 L14.8,11 Z" />
       </g>
     </svg>
   );
