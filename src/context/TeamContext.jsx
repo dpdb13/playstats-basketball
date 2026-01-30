@@ -252,11 +252,7 @@ export function TeamProvider({ children }) {
 
   // CRUD de partidos
   const saveGame = useCallback(async (gameData) => {
-    console.log('[saveGame] called with:', { id: gameData.id, status: gameData.status, hasTeam: !!currentTeam, hasUser: !!user });
-    if (!currentTeam || !user) {
-      console.warn('[saveGame] ABORTED: no team or user', { currentTeam, user });
-      return;
-    }
+    if (!currentTeam || !user) return;
 
     const gameRecord = {
       id: gameData.id,
@@ -273,21 +269,14 @@ export function TeamProvider({ children }) {
       updated_at: new Date().toISOString()
     };
 
-    console.log('[saveGame] gameRecord:', { id: gameRecord.id, team_id: gameRecord.team_id, status: gameRecord.status });
-
     if (isOnline()) {
       try {
         const { error } = await supabase
           .from('games')
           .upsert(gameRecord);
 
-        if (error) {
-          console.error('[saveGame] Supabase error:', error);
-          throw error;
-        }
-        console.log('[saveGame] Supabase OK');
-      } catch (err) {
-        console.error('[saveGame] catch:', err);
+        if (error) throw error;
+      } catch {
         addToQueue({ type: 'upsert_game', data: gameRecord });
       }
     } else {
@@ -304,7 +293,6 @@ export function TeamProvider({ children }) {
       } else {
         updated = [gameRecord, ...prev];
       }
-      console.log('[saveGame] teamGames updated, count:', updated.length);
       setCachedGames(currentTeam.id, updated);
       return updated;
     });
