@@ -10,8 +10,8 @@ const GAMES_LIST_KEY = 'basketball-rotation-games-list';
 const GAME_DATA_PREFIX = 'basketball-rotation-game-';
 const AUTOSAVE_INTERVAL = 5000; // Guardar cada 5 segundos
 
-// Generar ID único para cada partido
-const generateGameId = () => `game_${Date.now()}`;
+// Generar ID único para cada partido (formato UUID para compatibilidad con Supabase)
+const generateGameId = () => crypto.randomUUID();
 
 // ============================================
 // FUNCIONES DE GESTIÓN DE PARTIDOS (localStorage)
