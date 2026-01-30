@@ -12,6 +12,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
   const [activeTab, setActiveTab] = useState('games');
   const [selectedFinishedGame, setSelectedFinishedGame] = useState(null);
   const [showDeleteTeam, setShowDeleteTeam] = useState(false);
+  const [gameToDelete, setGameToDelete] = useState(null);
 
   // Edicion de nombre
   const [editingName, setEditingName] = useState(false);
@@ -28,9 +29,16 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
 
   const isOwner = currentTeam.role === 'owner';
 
-  const handleDeleteGame = (gameId) => {
-    if (confirm('Eliminar este partido?')) {
-      deleteGame(gameId);
+  const handleDeleteGame = (gameId, e) => {
+    if (e) e.stopPropagation();
+    setGameToDelete(gameId);
+  };
+
+  const confirmDeleteGame = () => {
+    if (gameToDelete) {
+      deleteGame(gameToDelete);
+      setGameToDelete(null);
+      setSelectedFinishedGame(null);
     }
   };
 
@@ -225,7 +233,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                                 <Play className="w-4 h-4" /> Continuar
                               </button>
                               <button
-                                onClick={() => handleDeleteGame(game.id)}
+                                onClick={(e) => handleDeleteGame(game.id, e)}
                                 className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg font-bold text-sm"
                                 title="Eliminar"
                               >
@@ -268,8 +276,17 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                                     hour: '2-digit', minute: '2-digit'
                                   })}
                                 </div>
-                                <div className={`text-xs px-2 py-0.5 rounded font-bold ${didWin ? 'bg-green-600' : didLose ? 'bg-red-600' : 'bg-gray-600'}`}>
-                                  {didWin ? 'Victoria' : didLose ? 'Derrota' : 'Empate'}
+                                <div className="flex items-center gap-2">
+                                  <div className={`text-xs px-2 py-0.5 rounded font-bold ${didWin ? 'bg-green-600' : didLose ? 'bg-red-600' : 'bg-gray-600'}`}>
+                                    {didWin ? 'Victoria' : didLose ? 'Derrota' : 'Empate'}
+                                  </div>
+                                  <button
+                                    onClick={(e) => handleDeleteGame(game.id, e)}
+                                    className="p-1 bg-red-600/80 hover:bg-red-500 rounded"
+                                    title="Eliminar"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
                               </div>
                               <div className="text-lg font-bold mb-1">
@@ -367,7 +384,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                 </button>
                 <button
                   onClick={() => {
-                    handleDeleteGame(selectedFinishedGame.id);
+                    setGameToDelete(selectedFinishedGame.id);
                     setSelectedFinishedGame(null);
                   }}
                   className="w-full bg-red-600 hover:bg-red-500 active:bg-red-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
@@ -377,6 +394,32 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                 <button
                   onClick={() => setSelectedFinishedGame(null)}
                   className="w-full bg-gray-600 hover:bg-gray-500 active:bg-gray-400 py-3 rounded-lg font-bold"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal confirmar eliminar partido */}
+        {gameToDelete && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+            <div className="bg-gray-800 rounded-xl p-5 border-2 border-red-500 max-w-sm w-full">
+              <h3 className="text-lg font-black text-red-400 mb-3">Eliminar partido</h3>
+              <p className="text-gray-300 text-sm mb-4">
+                Este partido se eliminara permanentemente. Esta accion no se puede deshacer.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={confirmDeleteGame}
+                  className="flex-1 bg-red-600 hover:bg-red-500 py-2 rounded-lg font-bold"
+                >
+                  Si, eliminar
+                </button>
+                <button
+                  onClick={() => setGameToDelete(null)}
+                  className="flex-1 bg-gray-600 hover:bg-gray-500 py-2 rounded-lg font-bold"
                 >
                   Cancelar
                 </button>
