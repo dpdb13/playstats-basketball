@@ -16,7 +16,9 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 ## Estado actual del código
 - Es un único componente React: `BasketballRotationTracker`
 - Todo el código está en un solo archivo
-- Funciona pero no está desplegado en ningún sitio (solo código)
+- **PWA (Progressive Web App)** - Se puede instalar como app en móvil
+- **Desplegada en:** https://dpdb13.github.io/playstats-basketball/
+- **Nombre oficial:** PlayStats Basketball
 
 ## Funcionalidades implementadas
 
@@ -57,9 +59,19 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
   - Estadísticas de quintetos (tiempo juntos, +/-)
   - Stints de cada jugador
 
+### Múltiples partidos (historial)
+- Cada partido se guarda con un ID único
+- **Menú principal (HOME):**
+  - Botón "NUEVO PARTIDO" para crear un partido
+  - Botón "VER PARTIDOS (n)" para ver el historial
+  - Botón "CONTINUAR PARTIDO" aparece si hay uno en progreso
+- **Historial:** Lista de partidos con fecha, equipos, marcador, estado
+- **Acciones en historial:** Continuar/ver, descargar reporte, eliminar
+- **Salir de un partido:** Botón ⊗ muestra opciones de guardar/finalizar
+
 ### Otras funcionalidades
 - Deshacer última acción
-- Reset completo (mantener pulsado)
+- Reset completo (mantener pulsado) - elimina el partido actual
 - Configurar intervalos de tiempo para alertas
 
 ## Jugadores por defecto
@@ -82,6 +94,40 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - (por definir con Diego)
 
 ## Historial de conversaciones
+
+### 25 enero 2026 - Sesión 4: PWA + GitHub Pages + Múltiples Partidos
+**Mejoras implementadas:**
+
+1. **Configuración como PWA:**
+   - Archivo `manifest.json` con iconos
+   - Service Worker para funcionamiento offline
+   - Se puede instalar como app en el móvil
+
+2. **Despliegue a GitHub Pages:**
+   - Repositorio: https://github.com/dpdb13/playstats-basketball
+   - URL de la app: https://dpdb13.github.io/playstats-basketball/
+   - Script `npm run deploy` para actualizar
+
+3. **Sistema de múltiples partidos:**
+   - Nueva estructura de datos con ID único por partido
+   - Menú principal (HOME) con opciones
+   - Pantalla de historial con lista de partidos
+   - Modal de salida (guardar/finalizar/cancelar)
+   - Migración automática de datos antiguos
+
+**Estructura de localStorage:**
+- `basketball-rotation-games-list` → Lista con info básica de cada partido
+- `basketball-rotation-game-{id}` → Datos completos de cada partido
+
+**Flujo de navegación:**
+```
+HOME → Nuevo partido → Selección equipo → Partido
+HOME → Continuar → Partido existente
+HOME → Ver partidos → Historial → Seleccionar → Partido
+Partido → Salir → Modal → Guardar/Finalizar → HOME
+```
+
+---
 
 ### 25 enero 2025 - Sesión 3: Guardado al cerrar
 **Mejora implementada:** Guardado automático al cerrar ventana o cambiar de pestaña.

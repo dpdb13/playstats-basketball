@@ -1,11 +1,67 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
-import { Clock, Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Target, Trophy, Undo2, RefreshCw, Bell, Edit3, Check, X } from 'lucide-react';
+import { Clock, Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Target, Undo2, RefreshCw, Bell, Edit3, Check, X } from 'lucide-react';
+import PlayStatsIcon from './components/PlayStatsIcon';
 
 // ============================================
 // CONSTANTES
 // ============================================
-const STORAGE_KEY = 'basketball-rotation-app-state';
+const STORAGE_KEY = 'basketball-rotation-app-state'; // Legacy - para migración
+const GAMES_LIST_KEY = 'basketball-rotation-games-list';
+const GAME_DATA_PREFIX = 'basketball-rotation-game-';
 const AUTOSAVE_INTERVAL = 5000; // Guardar cada 5 segundos
+
+// Generar ID único para cada partido
+const generateGameId = () => `game_${Date.now()}`;
+
+// ============================================
+// FUNCIONES DE GESTIÓN DE PARTIDOS (localStorage)
+// ============================================
+const getGamesList = () => {
+  try {
+    const data = localStorage.getItem(GAMES_LIST_KEY);
+    return data ? JSON.parse(data).games || [] : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveGamesList = (games) => {
+  localStorage.setItem(GAMES_LIST_KEY, JSON.stringify({ games }));
+};
+
+const addGameToList = (gameInfo) => {
+  const games = getGamesList();
+  games.push(gameInfo);
+  saveGamesList(games);
+};
+
+const updateGameInList = (gameInfo) => {
+  const games = getGamesList();
+  const index = games.findIndex(g => g.id === gameInfo.id);
+  if (index >= 0) {
+    games[index] = { ...games[index], ...gameInfo };
+  }
+  saveGamesList(games);
+};
+
+const removeGameFromList = (gameId) => {
+  const games = getGamesList().filter(g => g.id !== gameId);
+  saveGamesList(games);
+  localStorage.removeItem(`${GAME_DATA_PREFIX}${gameId}`);
+};
+
+const loadGameData = (gameId) => {
+  try {
+    const data = localStorage.getItem(`${GAME_DATA_PREFIX}${gameId}`);
+    return data ? JSON.parse(data) : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveGameData = (gameId, data) => {
+  localStorage.setItem(`${GAME_DATA_PREFIX}${gameId}`, JSON.stringify(data));
+};
 
 const INITIAL_PLAYERS = [
   { id: 1, name: 'David', number: '2', position: 'Base' },
@@ -295,17 +351,29 @@ PlayerCard.displayName = 'PlayerCard';
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
-export default function BasketballRotationTracker() {
+export default function BasketballRotationTracker({ initialPlayers, onExit, onGameSaved, savedGameData }) {
+  // Jugadores: usar initialPlayers prop o los hardcoded por defecto
+  const effectivePlayers = initialPlayers || INITIAL_PLAYERS;
+
   // Estado para saber si ya cargamos datos guardados
   const [isInitialized, setIsInitialized] = useState(false);
 
+  // Estados de navegación
+  // Si nos pasan savedGameData, ir directo al partido; si no, a seleccion de equipo
+  const [currentScreen, setCurrentScreen] = useState(() => savedGameData ? 'game' : 'team-selection');
+  const [currentGameId, setCurrentGameId] = useState(() => savedGameData?.id || null);
+  const [showExitModal, setShowExitModal] = useState(false);
+
   // Estados principales del juego
-  const [gameStarted, setGameStarted] = useState(false);
-  const [isHomeTeam, setIsHomeTeam] = useState(null);
-  const [players, setPlayers] = useState(() => INITIAL_PLAYERS.map(createInitialPlayerState));
+  const [gameStarted, setGameStarted] = useState(() => savedGameData?.gameStarted ?? false);
+  const [isHomeTeam, setIsHomeTeam] = useState(() => savedGameData?.isHomeTeam ?? null);
+  const [players, setPlayers] = useState(() => {
+    if (savedGameData?.players) return savedGameData.players;
+    return effectivePlayers.map(createInitialPlayerState);
+  });
   const [gameRunning, setGameRunning] = useState(false);
-  const [gameTime, setGameTime] = useState(600);
-  const [currentQuarter, setCurrentQuarter] = useState(1);
+  const [gameTime, setGameTime] = useState(() => savedGameData?.gameTime ?? 600);
+  const [currentQuarter, setCurrentQuarter] = useState(() => savedGameData?.currentQuarter ?? 1);
 
   // Estados de UI
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -327,26 +395,26 @@ export default function BasketballRotationTracker() {
   const [fouledOutPlayer, setFouledOutPlayer] = useState(null);
 
   // Configuración
-  const [intervals, setIntervals] = useState({ green: { minutes: 3, seconds: 0 }, yellow: { minutes: 4, seconds: 30 } });
-  const [benchIntervals, setBenchIntervals] = useState({ red: { minutes: 3, seconds: 0 }, yellow: { minutes: 4, seconds: 30 } });
+  const [intervals, setIntervals] = useState(() => savedGameData?.intervals || { green: { minutes: 3, seconds: 0 }, yellow: { minutes: 4, seconds: 30 } });
+  const [benchIntervals, setBenchIntervals] = useState(() => savedGameData?.benchIntervals || { red: { minutes: 3, seconds: 0 }, yellow: { minutes: 4, seconds: 30 } });
 
   // Equipos y marcador
-  const [homeTeam, setHomeTeam] = useState('Local');
-  const [awayTeam, setAwayTeam] = useState('Visitante');
-  const [homeScore, setHomeScore] = useState(0);
-  const [awayScore, setAwayScore] = useState(0);
+  const [homeTeam, setHomeTeam] = useState(() => savedGameData?.homeTeam || 'Home');
+  const [awayTeam, setAwayTeam] = useState(() => savedGameData?.awayTeam || 'Away');
+  const [homeScore, setHomeScore] = useState(() => savedGameData?.homeScore ?? 0);
+  const [awayScore, setAwayScore] = useState(() => savedGameData?.awayScore ?? 0);
 
   // Historial y estadísticas
-  const [rotationHistory, setRotationHistory] = useState([]);
-  const [actionHistory, setActionHistory] = useState([]);
-  const [quintetHistory, setQuintetHistory] = useState([]);
-  const [currentQuintet, setCurrentQuintet] = useState(null);
-  const [substitutionsByQuarter, setSubstitutionsByQuarter] = useState({ 1: 0, 2: 0, 3: 0, 4: 0 });
-  const [scoresByQuarter, setScoresByQuarter] = useState({ 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } });
-  const [leadChanges, setLeadChanges] = useState(0);
-  const [ties, setTies] = useState(0);
-  const [biggestLead, setBiggestLead] = useState({ us: 0, them: 0 });
-  const [partialScores, setPartialScores] = useState(INITIAL_PARTIAL_SCORES);
+  const [rotationHistory, setRotationHistory] = useState(() => savedGameData?.rotationHistory || []);
+  const [actionHistory, setActionHistory] = useState(() => savedGameData?.actionHistory || []);
+  const [quintetHistory, setQuintetHistory] = useState(() => savedGameData?.quintetHistory || []);
+  const [currentQuintet, setCurrentQuintet] = useState(() => savedGameData?.currentQuintet || null);
+  const [substitutionsByQuarter, setSubstitutionsByQuarter] = useState(() => savedGameData?.substitutionsByQuarter || { 1: 0, 2: 0, 3: 0, 4: 0 });
+  const [scoresByQuarter, setScoresByQuarter] = useState(() => savedGameData?.scoresByQuarter || { 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } });
+  const [leadChanges, setLeadChanges] = useState(() => savedGameData?.leadChanges ?? 0);
+  const [ties, setTies] = useState(() => savedGameData?.ties ?? 0);
+  const [biggestLead, setBiggestLead] = useState(() => savedGameData?.biggestLead || { us: 0, them: 0 });
+  const [partialScores, setPartialScores] = useState(() => savedGameData?.partialScores || INITIAL_PARTIAL_SCORES);
 
   // Refs
   const longPressTimer = useRef(null);
@@ -356,51 +424,130 @@ export default function BasketballRotationTracker() {
   // AUTOGUARDADO Y RECUPERACIÓN
   // ============================================
 
-  // Cargar estado guardado al iniciar
+  // Migrar datos antiguos y configurar pantalla inicial
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
+      // Verificar si hay datos en formato antiguo (migración)
+      const oldData = localStorage.getItem(STORAGE_KEY);
+      if (oldData) {
+        const parsed = JSON.parse(oldData);
 
-        // Restaurar todos los estados
-        if (parsed.gameStarted !== undefined) setGameStarted(parsed.gameStarted);
-        if (parsed.isHomeTeam !== undefined) setIsHomeTeam(parsed.isHomeTeam);
-        if (parsed.players) setPlayers(parsed.players);
-        if (parsed.gameRunning !== undefined) setGameRunning(false); // Siempre pausado al cargar
-        if (parsed.gameTime !== undefined) setGameTime(parsed.gameTime);
-        if (parsed.currentQuarter !== undefined) setCurrentQuarter(parsed.currentQuarter);
-        if (parsed.intervals) setIntervals(parsed.intervals);
-        if (parsed.benchIntervals) setBenchIntervals(parsed.benchIntervals);
-        if (parsed.homeTeam) setHomeTeam(parsed.homeTeam);
-        if (parsed.awayTeam) setAwayTeam(parsed.awayTeam);
-        if (parsed.homeScore !== undefined) setHomeScore(parsed.homeScore);
-        if (parsed.awayScore !== undefined) setAwayScore(parsed.awayScore);
-        if (parsed.rotationHistory) setRotationHistory(parsed.rotationHistory);
-        if (parsed.actionHistory) setActionHistory(parsed.actionHistory);
-        if (parsed.quintetHistory) setQuintetHistory(parsed.quintetHistory);
-        if (parsed.currentQuintet) setCurrentQuintet(parsed.currentQuintet);
-        if (parsed.substitutionsByQuarter) setSubstitutionsByQuarter(parsed.substitutionsByQuarter);
-        if (parsed.scoresByQuarter) setScoresByQuarter(parsed.scoresByQuarter);
-        if (parsed.leadChanges !== undefined) setLeadChanges(parsed.leadChanges);
-        if (parsed.ties !== undefined) setTies(parsed.ties);
-        if (parsed.biggestLead) setBiggestLead(parsed.biggestLead);
-        if (parsed.partialScores) setPartialScores(parsed.partialScores);
+        // Si tiene datos de un partido, migrarlo al nuevo formato
+        if (parsed.gameStarted) {
+          const newId = generateGameId();
+          const gameData = { ...parsed, id: newId };
+          saveGameData(newId, gameData);
 
-        console.log('✅ Datos del partido recuperados');
+          addGameToList({
+            id: newId,
+            createdAt: parsed.savedAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            status: 'in_progress',
+            homeTeam: parsed.homeTeam || 'Home',
+            awayTeam: parsed.awayTeam || 'Away',
+            homeScore: parsed.homeScore || 0,
+            awayScore: parsed.awayScore || 0,
+            isHomeTeam: parsed.isHomeTeam,
+            currentQuarter: parsed.currentQuarter || 1
+          });
+
+          console.log('✅ Datos migrados al nuevo formato');
+        }
+
+        // Eliminar formato antiguo
+        localStorage.removeItem(STORAGE_KEY);
       }
     } catch (error) {
-      console.error('Error cargando datos guardados:', error);
+      console.error('Error en migración:', error);
     }
+
     setIsInitialized(true);
   }, []);
 
-  // Función para guardar estado
+  // Función para cargar un partido completo
+  const loadGame = useCallback((gameId) => {
+    const data = loadGameData(gameId);
+    if (!data) return;
+
+    setCurrentGameId(gameId);
+    setGameStarted(data.gameStarted ?? false);
+    setIsHomeTeam(data.isHomeTeam);
+    setPlayers(data.players || effectivePlayers.map(createInitialPlayerState));
+    setGameRunning(false); // Siempre pausado al cargar
+    setGameTime(data.gameTime ?? 600);
+    setCurrentQuarter(data.currentQuarter ?? 1);
+    setIntervals(data.intervals || { green: { minutes: 3, seconds: 0 }, yellow: { minutes: 4, seconds: 30 } });
+    setBenchIntervals(data.benchIntervals || { red: { minutes: 3, seconds: 0 }, yellow: { minutes: 4, seconds: 30 } });
+    setHomeTeam(data.homeTeam || 'Home');
+    setAwayTeam(data.awayTeam || 'Away');
+    setHomeScore(data.homeScore ?? 0);
+    setAwayScore(data.awayScore ?? 0);
+    setRotationHistory(data.rotationHistory || []);
+    setActionHistory(data.actionHistory || []);
+    setQuintetHistory(data.quintetHistory || []);
+    setCurrentQuintet(data.currentQuintet || null);
+    setSubstitutionsByQuarter(data.substitutionsByQuarter || { 1: 0, 2: 0, 3: 0, 4: 0 });
+    setScoresByQuarter(data.scoresByQuarter || { 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } });
+    setLeadChanges(data.leadChanges ?? 0);
+    setTies(data.ties ?? 0);
+    setBiggestLead(data.biggestLead || { us: 0, them: 0 });
+    setPartialScores(data.partialScores || INITIAL_PARTIAL_SCORES);
+
+    setCurrentScreen('game');
+    console.log('✅ Partido cargado:', gameId);
+  }, []);
+
+  // Función para crear nuevo partido
+  const createNewGame = useCallback((isHome) => {
+    const newId = generateGameId();
+
+    // Reset estados a valores iniciales
+    setCurrentGameId(newId);
+    setGameStarted(true);
+    setIsHomeTeam(isHome);
+    setPlayers(effectivePlayers.map(createInitialPlayerState));
+    setGameRunning(false);
+    setGameTime(600);
+    setCurrentQuarter(1);
+    setHomeTeam('Home');
+    setAwayTeam('Away');
+    setHomeScore(0);
+    setAwayScore(0);
+    setRotationHistory([]);
+    setActionHistory([]);
+    setQuintetHistory([]);
+    setCurrentQuintet(null);
+    setSubstitutionsByQuarter({ 1: 0, 2: 0, 3: 0, 4: 0 });
+    setScoresByQuarter({ 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } });
+    setLeadChanges(0);
+    setTies(0);
+    setBiggestLead({ us: 0, them: 0 });
+    setPartialScores(INITIAL_PARTIAL_SCORES);
+
+    // Añadir a la lista de partidos (localStorage legacy)
+    addGameToList({
+      id: newId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      status: 'in_progress',
+      homeTeam: 'Home',
+      awayTeam: 'Away',
+      homeScore: 0,
+      awayScore: 0,
+      isHomeTeam: isHome,
+      currentQuarter: 1
+    });
+
+    setCurrentScreen('game');
+  }, [effectivePlayers]);
+
+  // Función para guardar estado del partido actual
   const saveState = useCallback(() => {
-    if (!isInitialized) return;
+    if (!isInitialized || !currentGameId) return;
 
     try {
       const stateToSave = {
+        id: currentGameId,
         gameStarted,
         isHomeTeam,
         players,
@@ -426,32 +573,129 @@ export default function BasketballRotationTracker() {
         savedAt: Date.now()
       };
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+      // Guardar datos completos del partido
+      saveGameData(currentGameId, stateToSave);
+
+      // Actualizar info en la lista
+      updateGameInList({
+        id: currentGameId,
+        updatedAt: new Date().toISOString(),
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        currentQuarter
+      });
+
       lastSaveTime.current = Date.now();
     } catch (error) {
       console.error('Error guardando estado:', error);
     }
   }, [
-    isInitialized, gameStarted, isHomeTeam, players, gameRunning, gameTime, currentQuarter,
+    isInitialized, currentGameId, gameStarted, isHomeTeam, players, gameRunning, gameTime, currentQuarter,
     intervals, benchIntervals, homeTeam, awayTeam, homeScore, awayScore,
     rotationHistory, actionHistory, quintetHistory, currentQuintet,
     substitutionsByQuarter, scoresByQuarter, leadChanges, ties, biggestLead, partialScores
   ]);
 
+  // Obtener estado completo del partido para sincronizar
+  const getFullGameState = useCallback(() => ({
+    id: currentGameId,
+    gameStarted,
+    isHomeTeam,
+    players,
+    gameRunning: false,
+    gameTime,
+    currentQuarter,
+    intervals,
+    benchIntervals,
+    homeTeam,
+    awayTeam,
+    homeScore,
+    awayScore,
+    rotationHistory,
+    actionHistory,
+    quintetHistory,
+    currentQuintet,
+    substitutionsByQuarter,
+    scoresByQuarter,
+    leadChanges,
+    ties,
+    biggestLead,
+    partialScores,
+    savedAt: Date.now()
+  }), [
+    currentGameId, gameStarted, isHomeTeam, players, gameTime, currentQuarter,
+    intervals, benchIntervals, homeTeam, awayTeam, homeScore, awayScore,
+    rotationHistory, actionHistory, quintetHistory, currentQuintet,
+    substitutionsByQuarter, scoresByQuarter, leadChanges, ties, biggestLead, partialScores
+  ]);
+
+  // Guardar y volver
+  const saveAndExit = useCallback(() => {
+    saveState();
+    const gameState = getFullGameState();
+    gameState.status = 'in_progress';
+    if (onGameSaved) onGameSaved(gameState);
+    setShowExitModal(false);
+    if (onExit) {
+      onExit();
+    } else {
+      setCurrentScreen('home');
+      setCurrentGameId(null);
+      setGameStarted(false);
+    }
+  }, [saveState, getFullGameState, onExit, onGameSaved]);
+
+  // Finalizar partido y volver
+  const finishGame = useCallback(() => {
+    saveState();
+    const gameState = getFullGameState();
+    gameState.status = 'completed';
+    if (onGameSaved) onGameSaved(gameState);
+
+    // Marcar como completado en localStorage legacy
+    updateGameInList({
+      id: currentGameId,
+      status: 'completed',
+      updatedAt: new Date().toISOString()
+    });
+
+    setShowExitModal(false);
+    if (onExit) {
+      onExit();
+    } else {
+      setCurrentScreen('home');
+      setCurrentGameId(null);
+      setGameStarted(false);
+    }
+  }, [saveState, getFullGameState, currentGameId, onExit, onGameSaved]);
+
+  // Eliminar partido del historial
+  const deleteGame = useCallback((gameId) => {
+    removeGameFromList(gameId);
+  }, []);
+
   // Autoguardado periódico
   useEffect(() => {
-    if (!isInitialized || !gameStarted) return;
+    if (!isInitialized || !currentGameId || currentScreen !== 'game') return;
 
     const interval = setInterval(() => {
       saveState();
+      // Sincronizar con Supabase via callback
+      if (onGameSaved) {
+        const state = getFullGameState();
+        state.status = 'in_progress';
+        onGameSaved(state);
+      }
     }, AUTOSAVE_INTERVAL);
 
     return () => clearInterval(interval);
-  }, [isInitialized, gameStarted, saveState]);
+  }, [isInitialized, currentGameId, currentScreen, saveState, onGameSaved, getFullGameState]);
 
   // Guardar al cerrar ventana o cambiar de pestaña
   useEffect(() => {
-    if (!isInitialized || !gameStarted) return;
+    if (!isInitialized || !currentGameId || currentScreen !== 'game') return;
 
     // Guardar cuando el usuario cierra la ventana/pestaña
     const handleBeforeUnload = (e) => {
@@ -482,18 +726,18 @@ export default function BasketballRotationTracker() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [isInitialized, gameStarted, saveState]);
+  }, [isInitialized, currentGameId, currentScreen, saveState]);
 
   // Guardar al cambiar estados importantes
   useEffect(() => {
-    if (isInitialized && gameStarted) {
+    if (isInitialized && currentGameId && currentScreen === 'game') {
       // Debounce: solo guardar si pasaron más de 1 segundo desde el último guardado
       const now = Date.now();
       if (now - lastSaveTime.current > 1000) {
         saveState();
       }
     }
-  }, [homeScore, awayScore, players, currentQuarter, gameTime, isInitialized, gameStarted, saveState]);
+  }, [homeScore, awayScore, players, currentQuarter, gameTime, isInitialized, currentGameId, currentScreen, saveState]);
 
   // ============================================
   // FUNCIONES MEMOIZADAS
@@ -1036,18 +1280,20 @@ export default function BasketballRotationTracker() {
   }, []);
 
   const confirmReset = useCallback(() => {
-    // Limpiar localStorage
-    localStorage.removeItem(STORAGE_KEY);
+    // Eliminar el partido actual del historial
+    if (currentGameId) {
+      removeGameFromList(currentGameId);
+    }
 
     // Resetear todos los estados
-    setPlayers(INITIAL_PLAYERS.map(createInitialPlayerState));
+    setPlayers(effectivePlayers.map(createInitialPlayerState));
     setGameTime(600);
     setCurrentQuarter(1);
     setGameRunning(false);
     setShowResetConfirm(false);
     setRotationHistory([]);
-    setHomeTeam('Local');
-    setAwayTeam('Visitante');
+    setHomeTeam('Home');
+    setAwayTeam('Away');
     setHomeScore(0);
     setAwayScore(0);
     setGameStarted(false);
@@ -1063,7 +1309,15 @@ export default function BasketballRotationTracker() {
     setTies(0);
     setBiggestLead({ us: 0, them: 0 });
     setPartialScores(INITIAL_PARTIAL_SCORES);
-  }, []);
+
+    // Volver
+    setCurrentGameId(null);
+    if (onExit) {
+      onExit();
+    } else {
+      setCurrentScreen('home');
+    }
+  }, [currentGameId, effectivePlayers, onExit]);
 
   const addPoints = useCallback((playerId) => {
     const { ourScore, rivalScore } = getCurrentScores();
@@ -1365,7 +1619,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
   }, [getCurrentScores, currentQuintet, gameRunning, endCurrentQuintet, players, quintetHistory, substitutionsByQuarter, ourTeamName, rivalTeamName]);
 
   // ============================================
-  // RENDER - PANTALLA INICIAL
+  // RENDER - PANTALLA DE CARGA
   // ============================================
   if (!isInitialized) {
     return (
@@ -1378,23 +1632,90 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
     );
   }
 
-  if (!gameStarted) {
+  // ============================================
+  // RENDER - PANTALLA HOME (solo en modo legacy sin onExit)
+  // ============================================
+  if (currentScreen === 'home' && !onExit) {
+    const gamesList = getGamesList();
+    const inProgressGame = gamesList.find(g => g.status === 'in_progress');
+
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
         <div className="bg-gray-800 rounded-2xl p-6 sm:p-8 border-2 border-orange-500 max-w-md w-full">
-          <div className="flex items-center justify-center gap-2 mb-6">
-            <Trophy className="w-8 h-8 text-orange-500" />
-            <h1 className="text-xl sm:text-2xl font-black text-orange-400">Basketball Tracker</h1>
+          <div className="flex items-center justify-center gap-2 mb-8">
+            <PlayStatsIcon className="w-8 h-8 text-orange-500" />
+            <h1 className="text-xl sm:text-2xl font-black text-orange-400">PlayStats Basketball</h1>
           </div>
-          <h2 className="text-lg font-bold text-center mb-6 text-gray-300">¿Tu equipo juega como...?</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <button onClick={() => { setIsHomeTeam(true); setGameStarted(true); }} className="bg-blue-700 hover:bg-blue-600 active:bg-blue-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-blue-400">
-              <div className="text-3xl sm:text-4xl mb-2">🏠</div>
-              <div className="text-lg sm:text-xl">LOCAL</div>
+
+          {inProgressGame && (
+            <button
+              onClick={() => loadGame(inProgressGame.id)}
+              className="w-full mb-4 bg-yellow-700 hover:bg-yellow-600 active:bg-yellow-500 rounded-xl p-4 border-2 border-yellow-400 text-left"
+            >
+              <div className="text-lg font-black flex items-center gap-2">
+                <Play className="w-5 h-5" /> CONTINUAR PARTIDO
+              </div>
+              <div className="text-sm text-yellow-200 mt-1">
+                {inProgressGame.homeTeam} {inProgressGame.homeScore} - {inProgressGame.awayScore} {inProgressGame.awayTeam}
+                <span className="ml-2 opacity-75">• Q{inProgressGame.currentQuarter}</span>
+              </div>
             </button>
-            <button onClick={() => { setIsHomeTeam(false); setGameStarted(true); }} className="bg-red-700 hover:bg-red-600 active:bg-red-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-red-400">
+          )}
+
+          <button
+            onClick={() => setCurrentScreen('team-selection')}
+            className="w-full mb-4 bg-green-700 hover:bg-green-600 active:bg-green-500 rounded-xl p-6 border-2 border-green-400"
+          >
+            <div className="text-3xl mb-2">🏀</div>
+            <div className="text-xl font-black">NUEVO PARTIDO</div>
+            <div className="text-sm text-green-300">Empezar a trackear</div>
+          </button>
+
+          <button
+            onClick={() => setCurrentScreen('history')}
+            className="w-full bg-blue-700 hover:bg-blue-600 active:bg-blue-500 rounded-xl p-6 border-2 border-blue-400"
+          >
+            <div className="text-3xl mb-2">📋</div>
+            <div className="text-xl font-black">VER PARTIDOS ({gamesList.length})</div>
+            <div className="text-sm text-blue-300">Historial guardado</div>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Si estamos en home pero tenemos onExit, volver al TeamDetail
+  if (currentScreen === 'home' && onExit) {
+    onExit();
+    return null;
+  }
+
+  // ============================================
+  // RENDER - PANTALLA SELECCIÓN DE EQUIPO
+  // ============================================
+  if (currentScreen === 'team-selection') {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
+        <div className="bg-gray-800 rounded-2xl p-6 sm:p-8 border-2 border-orange-500 max-w-md w-full">
+          <button
+            onClick={() => onExit ? onExit() : setCurrentScreen('home')}
+            className="mb-4 text-gray-400 hover:text-white flex items-center gap-2"
+          >
+            ← Volver
+          </button>
+          <div className="flex items-center justify-center gap-2 mb-6">
+            <PlayStatsIcon className="w-8 h-8 text-orange-500" />
+            <h1 className="text-xl sm:text-2xl font-black text-orange-400">Nuevo Partido</h1>
+          </div>
+          <h2 className="text-lg font-bold text-center mb-6 text-gray-300">Your team plays as...</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <button onClick={() => createNewGame(true)} className="bg-blue-700 hover:bg-blue-600 active:bg-blue-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-blue-400">
+              <div className="text-3xl sm:text-4xl mb-2">🏠</div>
+              <div className="text-lg sm:text-xl">HOME</div>
+            </button>
+            <button onClick={() => createNewGame(false)} className="bg-red-700 hover:bg-red-600 active:bg-red-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-red-400">
               <div className="text-3xl sm:text-4xl mb-2">✈️</div>
-              <div className="text-lg sm:text-xl">VISIT</div>
+              <div className="text-lg sm:text-xl">AWAY</div>
             </button>
           </div>
         </div>
@@ -1403,9 +1724,158 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
   }
 
   // ============================================
-  // RENDER - PANTALLA PRINCIPAL
+  // RENDER - PANTALLA HISTORIAL (solo en modo legacy sin onExit)
+  // ============================================
+  if (currentScreen === 'history' && !onExit) {
+    const gamesList = getGamesList().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+
+    return (
+      <div className="min-h-screen bg-gray-900 text-white p-4">
+        <div className="max-w-md mx-auto">
+          <div className="flex items-center gap-4 mb-6">
+            <button
+              onClick={() => setCurrentScreen('home')}
+              className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
+            >
+              ←
+            </button>
+            <h1 className="text-xl font-black text-orange-400">📋 Historial de Partidos</h1>
+          </div>
+
+          {gamesList.length === 0 ? (
+            <div className="text-center text-gray-500 py-8">
+              <div className="text-4xl mb-4">🏀</div>
+              <p>No hay partidos guardados</p>
+              <button
+                onClick={() => setCurrentScreen('team-selection')}
+                className="mt-4 bg-green-700 hover:bg-green-600 px-4 py-2 rounded-lg font-bold"
+              >
+                Crear primer partido
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {gamesList.map(game => {
+                const isInProgress = game.status === 'in_progress';
+                const ourScore = game.isHomeTeam ? game.homeScore : game.awayScore;
+                const theirScore = game.isHomeTeam ? game.awayScore : game.homeScore;
+                const didWin = ourScore > theirScore;
+                const didLose = ourScore < theirScore;
+
+                return (
+                  <div
+                    key={game.id}
+                    className={`bg-gray-800 rounded-xl p-4 border-2 ${isInProgress ? 'border-yellow-500' : 'border-gray-600'} relative`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="text-xs text-gray-400">
+                        📅 {new Date(game.updatedAt).toLocaleDateString('es-ES', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </div>
+                      <div className={`text-xs px-2 py-0.5 rounded font-bold ${isInProgress ? 'bg-yellow-600' : 'bg-green-600'}`}>
+                        {isInProgress ? '⏸️ En progreso' : '✅ Finalizado'}
+                      </div>
+                    </div>
+
+                    <div className="text-lg font-bold mb-2">
+                      <span className={game.isHomeTeam ? (didWin ? 'text-green-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
+                        {game.homeTeam} {game.homeScore}
+                      </span>
+                      <span className="text-gray-500"> - </span>
+                      <span className={!game.isHomeTeam ? (didWin ? 'text-green-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
+                        {game.awayScore} {game.awayTeam}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-gray-500 mb-3">
+                      Q{game.currentQuarter} {isInProgress ? '- En progreso' : '- Completado'}
+                      {game.isHomeTeam ? ' • Home' : ' • Away'}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => loadGame(game.id)}
+                        className="flex-1 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 py-2 rounded-lg font-bold text-sm"
+                      >
+                        {isInProgress ? '▶️ Continuar' : '👁️ Ver'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          const data = loadGameData(game.id);
+                          if (data) {
+                            // Cargar temporalmente para generar reporte
+                            loadGame(game.id);
+                            setTimeout(() => generateReport(), 100);
+                          }
+                        }}
+                        className="bg-purple-600 hover:bg-purple-500 active:bg-purple-400 px-3 py-2 rounded-lg font-bold text-sm"
+                        title="Descargar reporte"
+                      >
+                        📥
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (confirm('¿Eliminar este partido?')) {
+                            deleteGame(game.id);
+                            setCurrentScreen('history'); // Forzar re-render
+                          }
+                        }}
+                        className="bg-red-600 hover:bg-red-500 active:bg-red-400 px-3 py-2 rounded-lg font-bold text-sm"
+                        title="Eliminar"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================
+  // RENDER - PANTALLA PRINCIPAL DEL PARTIDO
   // ============================================
   return (
+    <>
+    {/* Modal de salida */}
+    {showExitModal && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div className="bg-gray-800 rounded-xl p-6 border-2 border-orange-500 max-w-sm w-full">
+          <h3 className="text-xl font-black text-center mb-4 text-orange-400">¿Qué quieres hacer?</h3>
+          <div className="space-y-3">
+            <button
+              onClick={saveAndExit}
+              className="w-full bg-yellow-600 hover:bg-yellow-500 active:bg-yellow-400 py-3 rounded-lg font-bold"
+            >
+              💾 GUARDAR Y SALIR
+              <div className="text-xs font-normal opacity-75">Podrás continuar después</div>
+            </button>
+            <button
+              onClick={finishGame}
+              className="w-full bg-green-600 hover:bg-green-500 active:bg-green-400 py-3 rounded-lg font-bold"
+            >
+              ✅ FINALIZAR PARTIDO
+              <div className="text-xs font-normal opacity-75">Se guarda en el historial</div>
+            </button>
+            <button
+              onClick={() => setShowExitModal(false)}
+              className="w-full bg-gray-600 hover:bg-gray-500 active:bg-gray-400 py-3 rounded-lg font-bold"
+            >
+              ❌ CANCELAR
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     <div className="min-h-screen bg-gray-900 text-white p-2 sm:p-4">
       <div className="max-w-7xl mx-auto space-y-2 sm:space-y-3">
 
@@ -1503,7 +1973,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
           <div className="grid grid-cols-3 gap-2 mb-2">
             <div className={`${isHomeTeam ? 'bg-blue-800 border-blue-400' : 'bg-blue-900/50 border-blue-600'} border-2 rounded-lg p-2 text-center`}>
               {editingTeam === 'home' ? (
-                <input type="text" defaultValue={homeTeam} onBlur={(e) => { setHomeTeam(e.target.value || 'Local'); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeTeam(e.target.value || 'Local'); setEditingTeam(null); }}} className="bg-gray-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
+                <input type="text" defaultValue={homeTeam} onBlur={(e) => { setHomeTeam(e.target.value || 'Home'); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeTeam(e.target.value || 'Home'); setEditingTeam(null); }}} className="bg-gray-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
               ) : (
                 <div className="text-xs sm:text-sm text-blue-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('home')}>{homeTeam}</div>
               )}
@@ -1583,7 +2053,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
             </div>
             <div className={`${!isHomeTeam ? 'bg-red-800 border-red-400' : 'bg-red-900/50 border-red-600'} border-2 rounded-lg p-2 text-center`}>
               {editingTeam === 'away' ? (
-                <input type="text" defaultValue={awayTeam} onBlur={(e) => { setAwayTeam(e.target.value || 'Visitante'); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayTeam(e.target.value || 'Visitante'); setEditingTeam(null); }}} className="bg-gray-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
+                <input type="text" defaultValue={awayTeam} onBlur={(e) => { setAwayTeam(e.target.value || 'Away'); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayTeam(e.target.value || 'Away'); setEditingTeam(null); }}} className="bg-gray-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
               ) : (
                 <div className="text-xs sm:text-sm text-red-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('away')}>{awayTeam}</div>
               )}
@@ -1653,6 +2123,9 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
             </button>
             <button onClick={generateReport} className="px-2 py-2 bg-blue-600 rounded-lg">
               <Download className="w-4 h-4" />
+            </button>
+            <button onClick={() => setShowExitModal(true)} className="px-2 py-2 bg-orange-600 rounded-lg" title="Salir del partido">
+              <XCircle className="w-4 h-4" />
             </button>
             <div className="flex items-center bg-gray-700 rounded-lg px-2 py-1">
               <Users className="w-4 h-4 text-blue-400" />
@@ -1961,5 +2434,6 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
         )}
       </div>
     </div>
+    </>
   );
 }
