@@ -30,10 +30,28 @@
           navigator.serviceWorker.register('/playstats-basketball/sw.js', { scope: '/playstats-basketball/' })
             .then((registration) => {
               console.log('✅ Service Worker registrado');
+              // Comprobar si hay una actualización esperando
+              if (registration.waiting) {
+                registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+              }
+              // Detectar cuando se instala un SW nuevo
+              registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'activated') {
+                    console.log('🔄 Nueva versión detectada, recargando...');
+                    window.location.reload();
+                  }
+                });
+              });
             })
             .catch((error) => {
               console.log('❌ Error registrando Service Worker:', error);
             });
+        });
+        // Cuando el nuevo SW toma el control, recargar
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          window.location.reload();
         });
       }
     </script>

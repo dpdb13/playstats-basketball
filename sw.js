@@ -1,4 +1,4 @@
-const CACHE_NAME = 'basketball-rotation-v6';
+const CACHE_NAME = 'basketball-rotation-v7';
 const urlsToCache = [
   '/playstats-basketball/',
   '/playstats-basketball/index.html'
@@ -27,6 +27,13 @@ self.addEventListener('activate', (event) => {
     })
   );
   self.clients.claim();
+});
+
+// Escuchar mensaje para activarse inmediatamente
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // Interceptar peticiones - Network first para HTML, Cache first para assets
