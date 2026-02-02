@@ -1,7 +1,7 @@
-const CACHE_NAME = 'basketball-rotation-v3';
+const CACHE_NAME = 'basketball-rotation-v4';
 const urlsToCache = [
-  '/',
-  '/index.html'
+  '/playstats-basketball/',
+  '/playstats-basketball/index.html'
 ];
 
 // Instalar el service worker y cachear archivos
