@@ -14,18 +14,30 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - **Lucide React** - iconos (Clock, Users, Play, etc.)
 
 ## Estado actual del código
-- Es un único componente React: `BasketballRotationTracker`
-- Todo el código está en un solo archivo
+- **Componente principal:** `BasketballRotationTracker.jsx` (~1,710 líneas)
+- **Archivos extraídos:**
+  - `src/lib/gameUtils.js` - funciones de utilidad (formatTime, getFoulStatus, etc.)
+  - `src/components/PlayerCard.jsx` - componente de tarjeta de jugador
+  - `src/lib/generateReport.js` - generación de reportes HTML
+- **Guardado:** Solo Supabase (via `onGameSaved` + `syncManager`). El localStorage legacy fue eliminado.
+- **Modales:** Unificados en un solo `activeModal` useState (valores: null, 'exit', 'reset', 'quarter', 'intervals', 'score', 'foul', 'fouledOut')
 - **PWA (Progressive Web App)** - Se puede instalar como app en móvil
 - **Desplegada en:** https://dpdb13.github.io/playstats-basketball/
 - **Nombre oficial:** PlayStats Basketball
+- **Service Worker:** Auto-actualización implementada (detecta nueva versión y recarga automáticamente)
+- **Cache actual:** `basketball-rotation-v21`
+- **Manifest:** `orientation: "any"` (permite horizontal y vertical)
 
 ## Funcionalidades implementadas
 
 ### Gestión de jugadores
 - 12 jugadores predefinidos con nombre, número y posición
 - Posiciones: Base, Alero, Joker, Unselected (no convocado)
-- Se pueden editar nombre, número y posición de cada jugador
+- **Posiciones secundarias:** cada jugador puede tener posiciones extra (ej: Joker que también juega de Alero)
+  - Se configuran en el editor del equipo con botones toggle
+  - Se guardan en Supabase como `secondary_positions text[]`
+  - Null safety: `player.secondary_positions || []` en toda la app
+- Se pueden editar nombre, número, posición y posiciones secundarias de cada jugador
 
 ### Control de tiempo
 - Tiempo de partido con cronómetro (10 min por cuarto)
@@ -35,6 +47,11 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 
 ### Sistema de faltas
 - Contador de faltas por jugador (máximo 5)
+- **Editor inline de faltas (+/-):** popover pequeño al pulsar en las faltas de un jugador
+  - Se cierra automáticamente a los 3 segundos o al pulsar fuera
+  - Popover se abre hacia arriba para no salirse de la pantalla
+- **Modal de faltas (campana):** para añadir falta rápida durante el juego (llama a `adjustFouls` internamente)
+- `adjustFouls` es la función única para toda la lógica de faltas (incluido fouled out)
 - Alertas visuales según cuarto:
   - Q1: 0 faltas = safe, 1 = warning, 2+ = danger
   - Q2: 0-1 = safe, 2 = warning, 3+ = danger
@@ -51,7 +68,11 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - Detecta jugadores que llevan mucho tiempo en pista (rojo)
 - Detecta jugadores con problemas de faltas
 - Sugiere reemplazos de la misma posición
-- Jorge y Unai (Jokers) pueden jugar como Aleros
+- **Posiciones secundarias:** sugiere jugadores cuya `secondary_positions` incluya la posición necesaria
+  - Guardia: solo sugiere si hay otro jugador de su posición primaria en banquillo sin problemas de faltas (el tiempo se ignora)
+  - Texto dinámico: `⚠️ Joker→Alero` (o cualquier combinación)
+  - Funciona tanto en recomendaciones normales como en el modal de fouled out
+  - Ya no hay nombres hardcodeados (era `flexibleJokers = ['Jorge', 'Unai']`)
 
 ### Reportes
 - Genera HTML descargable con:
@@ -59,14 +80,9 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
   - Estadísticas de quintetos (tiempo juntos, +/-)
   - Stints de cada jugador
 
-### Múltiples partidos (historial)
-- Cada partido se guarda con un ID único
-- **Menú principal (HOME):**
-  - Botón "NUEVO PARTIDO" para crear un partido
-  - Botón "VER PARTIDOS (n)" para ver el historial
-  - Botón "CONTINUAR PARTIDO" aparece si hay uno en progreso
-- **Historial:** Lista de partidos con fecha, equipos, marcador, estado
-- **Acciones en historial:** Continuar/ver, descargar reporte, eliminar
+### Múltiples partidos
+- Cada partido se guarda con un ID único en Supabase
+- Gestión de partidos via TeamDetail (no hay pantalla HOME/HISTORY legacy)
 - **Salir de un partido:** Botón ⊗ muestra opciones de guardar/finalizar
 
 ### Otras funcionalidades
@@ -74,26 +90,314 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - Reset completo (mantener pulsado) - elimina el partido actual
 - Configurar intervalos de tiempo para alertas
 
-## Jugadores por defecto
-| # | Nombre | Posición |
-|---|--------|----------|
-| 2 | David | Base |
-| 4 | Coco | Base |
-| 5 | Clemen | Base |
-| 12 | Hugo | Base |
-| 10 | Lucas | Base |
-| 9 | Pablo | Alero |
-| 3 | Tommy | Alero |
-| 11 | Miguel | Alero |
-| 8 | Unai | Joker |
-| 6 | Nico | Joker |
-| 7 | Jorge | Joker |
-| 0 | Jugador 12 | Unselected |
+## Jugadores
+- Ya no hay jugadores hardcoded en el código
+- Los jugadores vienen del prop `initialPlayers` (desde Supabase/TeamDetail)
 
-## Pendiente / Ideas futuras
-- (por definir con Diego)
+## Visión de producto (definida 7 febrero 2026)
+
+PlayStats Basketball va a convertirse en un **producto comercial** para entrenadores de baloncesto.
+
+### Propuesta de valor única (USP)
+> "PlayStats es el asistente de rotaciones inteligente para entrenadores de basket. No solo trackea tiempo - te dice a quién cambiar, por quién, y por qué."
+
+Ninguna app combina: recomendaciones inteligentes + faltas contextuales por cuarto + posiciones secundarias con guardia de cobertura + análisis de quintetos con +/-. Eso es nuestro diferenciador.
+
+### Target market
+- **Primario:** Canteras de baloncesto en España (~12,000-16,000 equipos)
+- **Secundario:** Amateur adulto (ligas municipales, corporate)
+- **Terciario:** Mercado anglosajón (USA ~500,000 equipos youth basketball)
+
+### Modelo de negocio: Freemium
+| | Gratis | Pro ($5/mes) | Club ($10/mes) |
+|---|---|---|---|
+| Equipos | 1 | Ilimitados | Ilimitados |
+| Partidos guardados | 5 | Ilimitados | Ilimitados |
+| Dashboard temporada | No | Sí | Sí |
+| Reportes avanzados | No | Sí | Sí |
+| Vista padres | No | No | Sí |
+| Compartir WhatsApp | No | No | Sí |
+| Planificador rotaciones | No | No | Sí |
+
+### Competencia principal
+- **SubTime** (~$5/mes): 50K coaches, rotaciones pero SIN recomendaciones inteligentes
+- **GameChanger** (gratis coaches): #1 en USA, scoring+streaming pero SIN rotaciones
+- **iScore**: Stats detalladas pero complejo y SIN recomendaciones
+- **TeamSnap** ($10-15/mes): Gestión completa pero genérico multi-deporte
+
+---
+
+## Decisiones estratégicas (7 febrero 2026)
+
+### Idioma
+- Cambiar toda la UI a **inglés** (actualmente mezcla español/inglés)
+- Preparar estructura para i18n futuro
+
+### Posiciones configurables
+- Cambiar Base/Alero/Joker por sistema configurable por equipo
+- Cada equipo define: número de posiciones, nombre de cada una
+- Los jugadores se configuran según las posiciones de su equipo
+- Por defecto ofrecer las 5 estándar (PG, SG, SF, PF, C)
+
+### Vista dual durante partido
+- **Vista compacta** (por defecto): para registrar datos rápido. Solo lo esencial: nombre + stint actual + color semáforo + botón IN/OUT
+- **Vista expandida** (botón toggle): para analizar mid-game. Todos los datos visibles + stats
+- **Botón de volver** a vista compacta desde la expandida
+
+### Dos modos de stats (futuro)
+- **Modo Simplificado** (actual + mejoras): puntos, faltas, tiempo, rotaciones, recomendaciones
+- **Modo Avanzado** (Fase 5): asistencias, rebotes, tiros fallados, tipo de jugada (juego libre, contraataque, transición, jugada de equipo...)
+- El modo avanzado es diferenciador vs iScore porque combina stats detalladas CON recomendaciones inteligentes
+
+### Arquitectura: eventLog desde el día 1
+Implementar un registro de eventos con timestamp desde la Fase 0, preparado para el modo avanzado futuro:
+```javascript
+{
+  timestamp: Date.now(),       // momento exacto
+  gameTime: 342,               // segundos del reloj
+  quarter: 2,                  // cuarto
+  type: "score",               // score | foul | assist | rebound | miss | turnover...
+  team: "home",                // home | away
+  playerId: "uuid-xxx",        // quién (UUID de Supabase)
+  assistById: null,            // futuro: quién asistió
+  value: 2,                    // puntos (para score)
+  playType: null,              // futuro: fastbreak | setplay | transition...
+  lineupOnCourt: ["uuid1", "uuid2", ...],  // quinteto en pista en ese momento
+}
+```
+Cada evento vinculado al quinteto que estaba jugando → permite correlaciones potentísimas en el futuro.
+
+### Código primero
+- TypeScript + tests ANTES de features nuevas
+- Calidad de código es prioridad sobre velocidad de shipping
+
+---
+
+## Roadmap (definido 7 febrero 2026)
+
+### Fase 0: "Arreglar lo roto" (1 semana)
+- [ ] **BUG-1 CRÍTICO:** `secondary_positions` no llega al tracker (`App.jsx:17-23`). Las recomendaciones cross-position NO FUNCIONAN.
+- [ ] **BUG-2:** IDs son índices numéricos, no UUIDs de Supabase (`App.jsx:17`). Datos históricos se corrompen si cambia el roster.
+- [ ] **BUG-7:** Undo no restaura `lastToggle`, `totalCourtTime`, `totalBenchTime`, `stints`, `stintPlusMinus`
+- [ ] **BUG-3:** `setGameRunning(false)` dentro de `setGameTime` updater (React 19 batching)
+- [ ] Implementar `eventLog[]` con estructura preparada para modo avanzado
+- [ ] Agregar `version` al `game_data` para migraciones futuras
+- [ ] Eliminar `App.css` (código muerto del template Vite)
+
+### Fase 2: "Que parezca un producto" (UI/UX) — antes de Fase 1
+- [ ] Rediseño de paleta: reducir a 5-6 colores con sistema coherente
+- [ ] Botones: mínimo 44px (Apple HIG), botones críticos 56-72px
+- [ ] Marcador sticky arriba con tipografía grande (`text-4xl md:text-5xl`)
+- [ ] Reordenar secciones: Marcador → Jugadores en pista → Recomendaciones → Banquillo
+- [ ] PlayerCard compacta (vista dual: compacta ↔ expandida)
+- [ ] Sección de faltas colapsable (solo mostrar cuando hay warning/danger)
+- [ ] Recomendaciones compactas: una línea por recomendación
+- [ ] Unificar idioma a inglés
+- [ ] Animaciones en modales (fade + slide)
+- [ ] Posiciones configurables (número, nombre, asignación por jugador)
+- [ ] Formato de partido configurable (duración cuartos, máx faltas)
+
+### Fase 1: "El reporte que ya deberías tener" (reporting)
+- [ ] Puntos por jugador en el reporte (dato ya existe)
+- [ ] Faltas por jugador en el reporte (dato ya existe)
+- [ ] +/- individual por jugador (sumar `stintPlusMinus`, dato ya existe)
+- [ ] Parciales por cuarto (dato ya existe en `partialScores`)
+- [ ] Scores por cuarto (dato ya existe en `scoresByQuarter`)
+- [ ] Cambios de líder, empates, mayor ventaja (datos ya existen)
+- [ ] Net rating por lineup: `(pointsScored - pointsAllowed) / duration * 10`
+- [ ] Eficiencia ofensiva/defensiva por quinteto
+- [ ] Historial de rotaciones (timeline visual)
+- [ ] Correlación stint duration vs rendimiento
+
+### Fase 3: "Listo para vender" (comercialización)
+- [ ] Migrar a TypeScript
+- [ ] Tests para lógica crítica (faltas, recomendaciones, quintetos, parciales)
+- [ ] Descomponer BasketballRotationTracker en hooks: `useGameTimer`, `usePlayerManagement`, `useScoring`, `useSubstitutionRecommendations`, `useGamePersistence`, `useQuintets`
+- [ ] Sistema de errores/notificaciones visible (toasts)
+- [ ] Onboarding wizard (3 pantallas + tooltips)
+- [ ] Dashboard de temporada básico
+- [ ] Compartir reporte por link
+- [ ] Landing page profesional
+- [ ] Recomendaciones mejoradas: considerar marcador para urgencia, contexto de cuarto (atenuar últimos 2 min)
+
+### Fase 4: "Motor de crecimiento" (guardar para después)
+- [ ] Vista para padres (link individual por jugador, solo lectura)
+- [ ] Compartir por WhatsApp (resumen formateado)
+- [ ] Alertas sonoras/vibración cuando jugador pasa a rojo
+- [ ] Planificador de rotaciones pre-partido
+- [ ] Sistema de suscripciones (Stripe, tabla plans, límites por tier)
+- [ ] Roles granulares: owner, coach, assistant, viewer
+- [ ] Tabla `player_game_stats` desnormalizada para queries cross-game
+- [ ] App Store / Play Store (TWA o React Native wrapper)
+
+### Fase 5: "Modo avanzado" (guardar para después)
+- [ ] Asistencias (¿quién dio el pase?)
+- [ ] Rebotes (ofensivo/defensivo)
+- [ ] Tiros fallados (con tipo de tiro)
+- [ ] Tipo de jugada (juego libre, jugada de equipo, contraataque, transición)
+- [ ] Toggle simplificado/avanzado por equipo
+- [ ] Todo correlacionado con quinteto en pista via eventLog
+
+---
+
+## Bugs conocidos (encontrados 7 febrero 2026 por Agent Team)
+
+### CRÍTICOS
+1. **BUG-1:** `secondary_positions` se pierde en `getPlayersForTracker()` (`App.jsx:17-23`). Las recomendaciones cross-position están rotas.
+2. **BUG-2:** IDs de jugadores son `index + 1` en vez de UUIDs de Supabase (`App.jsx:17`). Corrompe datos históricos si cambia orden del roster.
+
+### MEDIOS
+3. **BUG-3:** `setGameRunning(false)` dentro de `setGameTime` updater — comportamiento inconsistente en React 19 batching (`BasketballRotationTracker.jsx:354-359`)
+4. **BUG-4:** Race condition en autoguardado — puede guardar estado intermedio (`BasketballRotationTracker.jsx:218-230`)
+5. **BUG-7:** Undo no restaura `lastToggle`, tiempos acumulados ni `stintPlusMinus` (`BasketballRotationTracker.jsx:844-863`)
+
+### BAJOS
+6. **BUG-5:** Doble escritura en `beforeunload` (Supabase + localStorage queue) — duplicados posibles (`BasketballRotationTracker.jsx:254-277`)
+7. **BUG-6:** Tiempos no se actualizan al instante al pausar — fracción de segundo no contabilizada
+8. **BUG-8:** `courtWarning` no se auto-cierra
+
+### PWA
+9. **SW-1:** Posible doble recarga al actualizar (dos mecanismos: statechange + controllerchange)
+10. **SW-2:** `start_url` en manifest es `"./"` — debería ser `/playstats-basketball/` explícito
+11. **SW-3:** Service Worker cachea respuestas sin filtrar tipo (puede cachear respuestas opacas)
+
+---
+
+## Problemas de eficiencia conocidos
+- **EFI-1:** Componente principal ~1,714 líneas con ~30 estados (resolver en Fase 3 con hooks)
+- **EFI-2:** `PlayerCard` con `React.memo` se invalida por `editForm` cambiando en cada keystroke
+- **EFI-4:** Autoguardado envía estado completo cada 5s (no hay diff/delta)
+
+---
+
+## Notas de arquitectura para escalar
+- Supabase schema ya soporta multi-equipo básico (teams → team_members → team_players + games con RLS)
+- RLS policies hacen subquery que puede ser lento a escala → añadir índice en `team_members(user_id, team_id)`
+- `game_data` JSONB no permite queries por contenido → necesita tabla `player_game_stats` desnormalizada (Fase 4)
+- Función `get_team_by_invite_code` existe en Supabase pero no está en `supabase-schema.sql` versionado
 
 ## Historial de conversaciones
+
+### 3 febrero 2026 - Sesión 8: Navegación por gestos
+
+- Optimizacion para navegacion por gestos en movil/tablet:
+  - `viewport-fit=cover` anadido al meta viewport de index.html
+  - `overscroll-behavior: none` para evitar bounce elastico
+  - `-webkit-tap-highlight-color: transparent` global
+  - `env(safe-area-inset-*)` como padding en body
+- Cache bumpeado a v21, desplegado a GitHub Pages
+
+---
+
+### 3 febrero 2026 - Sesión 7: Posiciones secundarias + Mejora recomendaciones
+
+**Nueva columna en Supabase:**
+- `ALTER TABLE public.team_players ADD COLUMN secondary_positions text[] DEFAULT '{}';`
+- Ejecutada manualmente en el dashboard (la conexión directa por psql no funciona)
+
+**Null safety en gameUtils.js:**
+- `createInitialPlayerState` ahora incluye `secondary_positions: player.secondary_positions || []`
+
+**Editor de equipo (PlayerRosterEditor.jsx):**
+- Formularios de editar/añadir ahora incluyen `secondary_positions` en el estado
+- Nueva fila "Puede jugar de:" con botones toggle (pills coloreados: azul=Base, verde=Alero, morado=Joker)
+- Al cambiar posición principal, la secundaria conflictiva se limpia automáticamente
+- Si posición es "Unselected", se borran todas las secundarias
+- Badges pequeños (B, A, J) al lado del nombre en vista normal
+- Eliminada variable `positionColors` que no se usaba
+
+**Recomendaciones (BasketballRotationTracker.jsx):**
+- Eliminado: `const flexibleJokers = ['Jorge', 'Unai']` y bloque `if (player.position === 'Alero')`
+- Nueva lógica genérica: busca en banquillo jugadores cuya `secondary_positions` incluya la posición necesaria
+- Guardia de composición: solo sugiere si hay otro jugador de su posición primaria en banquillo sin faltas en peligro (tiempo se ignora)
+- Texto dinámico: `⚠️ {s.originalPosition}→{s.playingAs}` (ya no dice "Joker→Alero" hardcodeado)
+- `fouledOutReplacements` también busca por posición secundaria con la misma guardia
+- Modal de fouled out muestra badge de posición cruzada en botones de reemplazo
+
+**Revisión profunda de bugs:**
+- No se encontraron bugs reales
+- Verificado: undo preserva secondary_positions (spread operator), guardado/carga en Supabase OK, flujo fouledOut→reemplazo OK, null safety en todos los accesos
+
+**Cache:** v19 → v20. Desplegado a GitHub Pages.
+
+---
+
+### 3 febrero 2026 - Sesión 6: Tarjetas tablet + Editor inline de faltas
+
+**Cambios en grids:**
+- Grids de jugadores cambiadas de `sm:grid-cols-5` a `sm:grid-cols-4` (5 sitios + 1 placeholder)
+- En tablet las tarjetas ya no se aplastan porque caben máximo 4 por fila
+
+**Nuevo editor inline de faltas (+/-):**
+- Eliminado el formulario grande de editar stats (tenía 4 campos: pista, banquillo, faltas, puntos)
+- Eliminada la lógica de long-press del botón lápiz (ahora es click simple → editar nombre/número/posición)
+- Al pulsar en las faltas → popover con botones - y + (se abre hacia arriba)
+- Auto-cierre a los 3 segundos, o al pulsar fuera (backdrop invisible)
+- Props eliminadas de PlayerCard: `editingStats`, `statsForm`, `onStatsFormChange`, `onStartEditingStats`, `onSaveStats`
+- Prop nueva: `onAdjustFouls`
+
+**Unificación de lógica de faltas:**
+- `adjustFouls(playerId, delta)` es la fuente única de verdad para modificar faltas
+- `addFoulToPlayer` ahora solo hace `adjustFouls(playerId, 1)` + cierra modal
+- Eliminados estados: `editingStats`, `statsForm`
+- Eliminadas funciones: `startEditingStats`, `saveStatsEdit`
+
+**Correcciones de calidad (revisión senior):**
+1. Eliminada duplicación de lógica fouled-out entre `addFoulToPlayer` y `adjustFouls`
+2. Popover cambiado de `top-full` a `bottom-full` para no salirse de pantalla
+3. Timer del popover simplificado: un solo mecanismo (`startFoulTimer`) en vez de useEffect + función manual
+
+**Desplegado a GitHub Pages.**
+
+---
+
+### 2 febrero 2026 - Sesión 5: Simplificación del código + Mejora UX botones
+
+**Refactorización del código (5 pasos):**
+
+1. **Extraer funciones de utilidad a `src/lib/gameUtils.js`:**
+   - formatTime, formatGameTime, getFoulStatus, getFoulBgClass, getQuintetKey, createInitialPlayerState, INITIAL_PARTIAL_SCORES
+
+2. **Extraer PlayerCard a `src/components/PlayerCard.jsx`:**
+   - ~239 líneas movidas a su propio archivo con React.memo
+
+3. **Eliminar sistema legacy de localStorage (~250 líneas borradas):**
+   - Eliminadas constantes STORAGE_KEY, GAMES_LIST_KEY, GAME_DATA_PREFIX
+   - Eliminadas funciones getGamesList, saveGamesList, addGameToList, updateGameInList, removeGameFromList, loadGameData, saveGameData
+   - Eliminado array INITIAL_PLAYERS hardcoded
+   - Eliminadas funciones loadGame, saveState, deleteGame
+   - Eliminadas pantallas HOME y HISTORY legacy
+   - Eliminado useEffect de migración de datos antiguos
+   - Solo queda Supabase como sistema de guardado
+
+4. **Unificar 7 booleans de modales en 1 variable `activeModal`:**
+   - Valores: null, 'exit', 'reset', 'quarter', 'intervals', 'score', 'foul', 'fouledOut'
+   - showQuarterSelector se mantuvo separado (es un dropdown inline, no un modal)
+
+5. **Extraer generación de reportes a `src/lib/generateReport.js`:**
+   - ~133 líneas de JavaScript puro movidas a su propio archivo
+
+**Resultado:** Archivo principal reducido de 2,529 a ~1,710 líneas (-32%)
+
+**Mejoras de UX - Botones:**
+- Botones de puntos (+3, +2, +1) y faltas ahora son cuadrados (aspect-square) para facilitar el toque en tablets
+- Layout: Play + contador en columna izquierda, grid 4x2 a la derecha (puntos/faltas arriba, undo/ajustes/download/salir abajo)
+- Proporción 3:2 entre botones de puntos y botones secundarios
+
+**Parciales por cuarto:**
+- Añadida fila de total por cuarto debajo de cada par de parciales (5min + 5min)
+- Color verde/rojo/gris según resultado del cuarto
+
+**Service Worker - Auto-actualización:**
+- Resuelto bug: partidos antiguos mostraban UI vieja por cache del SW
+- Implementado mecanismo de auto-actualización en index.html (SKIP_WAITING + controllerchange)
+- Cache bumpeado de v4 a v12
+
+**Manifest - Orientación:**
+- Cambiado de `"portrait"` a `"any"` para permitir horizontal en tablets
+- Nota: en PWA instalada hay que reinstalar para que tome efecto
+
+---
 
 ### 25 enero 2026 - Sesión 4: PWA + GitHub Pages + Múltiples Partidos
 **Mejoras implementadas:**
@@ -110,22 +414,7 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 
 3. **Sistema de múltiples partidos:**
    - Nueva estructura de datos con ID único por partido
-   - Menú principal (HOME) con opciones
-   - Pantalla de historial con lista de partidos
    - Modal de salida (guardar/finalizar/cancelar)
-   - Migración automática de datos antiguos
-
-**Estructura de localStorage:**
-- `basketball-rotation-games-list` → Lista con info básica de cada partido
-- `basketball-rotation-game-{id}` → Datos completos de cada partido
-
-**Flujo de navegación:**
-```
-HOME → Nuevo partido → Selección equipo → Partido
-HOME → Continuar → Partido existente
-HOME → Ver partidos → Historial → Seleccionar → Partido
-Partido → Salir → Modal → Guardar/Finalizar → HOME
-```
 
 ---
 

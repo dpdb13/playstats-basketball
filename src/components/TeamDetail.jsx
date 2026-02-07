@@ -95,7 +95,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
-      <div className="max-w-md mx-auto">
+      <div className="max-w-md md:max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -335,7 +335,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Modal eliminar equipo */}
         {showDeleteTeam && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-5 border-2 border-red-500 max-w-sm w-full">
+            <div className="bg-gray-800 rounded-xl p-5 border-2 border-red-500 max-w-sm md:max-w-md w-full">
               <h3 className="text-lg font-black text-red-400 mb-3">Eliminar equipo</h3>
               <p className="text-gray-300 text-sm mb-4">
                 Se eliminaran todos los partidos y datos del equipo <strong>{currentTeam.name}</strong>. Esta accion no se puede deshacer.
@@ -351,7 +351,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Modal opciones partido finalizado */}
         {selectedFinishedGame && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-5 border-2 border-gray-500 max-w-sm w-full">
+            <div className="bg-gray-800 rounded-xl p-5 border-2 border-gray-500 max-w-sm md:max-w-md w-full">
               <h3 className="text-lg font-black text-white mb-1">
                 {selectedFinishedGame.home_team} {selectedFinishedGame.home_score} - {selectedFinishedGame.away_score} {selectedFinishedGame.away_team}
               </h3>
@@ -405,7 +405,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Modal confirmar eliminar partido */}
         {gameToDelete && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-5 border-2 border-red-500 max-w-sm w-full">
+            <div className="bg-gray-800 rounded-xl p-5 border-2 border-red-500 max-w-sm md:max-w-md w-full">
               <h3 className="text-lg font-black text-red-400 mb-3">Eliminar partido</h3>
               <p className="text-gray-300 text-sm mb-4">
                 Este partido se eliminara permanentemente. Esta accion no se puede deshacer.
@@ -440,7 +440,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Modal editar icono */}
         {showIconEditor && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-5 border-2 border-orange-500 max-w-sm w-full">
+            <div className="bg-gray-800 rounded-xl p-5 border-2 border-orange-500 max-w-sm md:max-w-md w-full">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-black text-orange-400">Cambiar icono</h3>
                 <button onClick={() => setShowIconEditor(false)} className="p-1 bg-gray-700 rounded-lg hover:bg-gray-600">

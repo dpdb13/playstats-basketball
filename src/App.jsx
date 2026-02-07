@@ -14,11 +14,12 @@ function AppContent() {
   // Convertir jugadores del roster de Supabase al formato que espera el tracker
   const getPlayersForTracker = useCallback(() => {
     if (!teamPlayers || teamPlayers.length === 0) return null;
-    return teamPlayers.map((p, index) => ({
-      id: index + 1,
+    return teamPlayers.map((p) => ({
+      id: p.id,
       name: p.name,
       number: p.number || '0',
-      position: p.position || 'Unselected'
+      position: p.position || 'Unselected',
+      secondary_positions: p.secondary_positions || []
     }));
   }, [teamPlayers]);
 
@@ -86,6 +87,8 @@ function AppContent() {
         savedGameData={activeGame.type === 'continue' ? activeGame.savedData : null}
         onExit={handleExitGame}
         onGameSaved={handleGameSaved}
+        teamId={currentTeam?.id}
+        userId={user?.id}
       />
     );
   }

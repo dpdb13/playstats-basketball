@@ -1,7 +1,7 @@
-const CACHE_NAME = 'basketball-rotation-v3';
+const CACHE_NAME = 'basketball-rotation-v22';
 const urlsToCache = [
-  '/',
-  '/index.html'
+  '/playstats-basketball/',
+  '/playstats-basketball/index.html'
 ];
 
 // Instalar el service worker y cachear archivos
@@ -27,6 +27,13 @@ self.addEventListener('activate', (event) => {
     })
   );
   self.clients.claim();
+});
+
+// Escuchar mensaje para activarse inmediatamente
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // Interceptar peticiones - Network first para HTML, Cache first para assets

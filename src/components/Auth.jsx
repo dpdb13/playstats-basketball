@@ -50,7 +50,7 @@ export default function Auth() {
   if (showReset) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
-        <div className="bg-gray-800 rounded-2xl p-6 sm:p-8 border-2 border-orange-500 max-w-md w-full">
+        <div className="bg-gray-800 rounded-2xl p-6 sm:p-8 md:p-10 border-2 border-orange-500 max-w-md w-full">
           <div className="flex items-center justify-center gap-2 mb-6">
             <PlayStatsIcon className="w-8 h-8 text-orange-500" />
             <h1 className="text-xl sm:text-2xl font-black text-orange-400">PlayStats Basketball</h1>
@@ -104,7 +104,7 @@ export default function Auth() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
-      <div className="bg-gray-800 rounded-2xl p-6 sm:p-8 border-2 border-orange-500 max-w-md w-full">
+      <div className="bg-gray-800 rounded-2xl p-6 sm:p-8 md:p-10 border-2 border-orange-500 max-w-md w-full">
         <div className="flex items-center justify-center gap-2 mb-6">
           <PlayStatsIcon className="w-8 h-8 text-orange-500" />
           <h1 className="text-xl sm:text-2xl font-black text-orange-400">PlayStats Basketball</h1>

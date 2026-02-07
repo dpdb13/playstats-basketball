@@ -54,6 +54,7 @@ create table if not exists public.team_players (
   name text not null,
   number text default '0',
   position text default 'Unselected' check (position in ('Base', 'Alero', 'Joker', 'Unselected')),
+  secondary_positions text[] default '{}',
   sort_order int default 0,
   created_at timestamptz default now()
 );

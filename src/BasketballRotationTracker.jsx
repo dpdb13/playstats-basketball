@@ -1,359 +1,26 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
-import { Clock, Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Target, Undo2, RefreshCw, Bell, Edit3, Check, X } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Undo2, RefreshCw, Bell } from 'lucide-react';
 import PlayStatsIcon from './components/PlayStatsIcon';
+import { addToQueue } from './lib/syncManager';
+import { formatTime, formatGameTime, getFoulStatus, getFoulBgClass, getQuintetKey, createInitialPlayerState, INITIAL_PARTIAL_SCORES } from './lib/gameUtils';
+import { generateReport as generateReportHTML } from './lib/generateReport';
+import PlayerCard from './components/PlayerCard';
 
 // ============================================
 // CONSTANTES
 // ============================================
-const STORAGE_KEY = 'basketball-rotation-app-state'; // Legacy - para migración
-const GAMES_LIST_KEY = 'basketball-rotation-games-list';
-const GAME_DATA_PREFIX = 'basketball-rotation-game-';
 const AUTOSAVE_INTERVAL = 5000; // Guardar cada 5 segundos
 
 // Generar ID único para cada partido (formato UUID para compatibilidad con Supabase)
 const generateGameId = () => crypto.randomUUID();
 
-// ============================================
-// FUNCIONES DE GESTIÓN DE PARTIDOS (localStorage)
-// ============================================
-const getGamesList = () => {
-  try {
-    const data = localStorage.getItem(GAMES_LIST_KEY);
-    return data ? JSON.parse(data).games || [] : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveGamesList = (games) => {
-  localStorage.setItem(GAMES_LIST_KEY, JSON.stringify({ games }));
-};
-
-const addGameToList = (gameInfo) => {
-  const games = getGamesList();
-  games.push(gameInfo);
-  saveGamesList(games);
-};
-
-const updateGameInList = (gameInfo) => {
-  const games = getGamesList();
-  const index = games.findIndex(g => g.id === gameInfo.id);
-  if (index >= 0) {
-    games[index] = { ...games[index], ...gameInfo };
-  }
-  saveGamesList(games);
-};
-
-const removeGameFromList = (gameId) => {
-  const games = getGamesList().filter(g => g.id !== gameId);
-  saveGamesList(games);
-  localStorage.removeItem(`${GAME_DATA_PREFIX}${gameId}`);
-};
-
-const loadGameData = (gameId) => {
-  try {
-    const data = localStorage.getItem(`${GAME_DATA_PREFIX}${gameId}`);
-    return data ? JSON.parse(data) : null;
-  } catch {
-    return null;
-  }
-};
-
-const saveGameData = (gameId, data) => {
-  localStorage.setItem(`${GAME_DATA_PREFIX}${gameId}`, JSON.stringify(data));
-};
-
-const INITIAL_PLAYERS = [
-  { id: 1, name: 'David', number: '2', position: 'Base' },
-  { id: 2, name: 'Coco', number: '4', position: 'Base' },
-  { id: 3, name: 'Clemen', number: '5', position: 'Base' },
-  { id: 4, name: 'Hugo', number: '12', position: 'Base' },
-  { id: 5, name: 'Lucas', number: '10', position: 'Base' },
-  { id: 6, name: 'Pablo', number: '9', position: 'Alero' },
-  { id: 7, name: 'Tommy', number: '3', position: 'Alero' },
-  { id: 8, name: 'Miguel', number: '11', position: 'Alero' },
-  { id: 9, name: 'Unai', number: '8', position: 'Joker' },
-  { id: 10, name: 'Nico', number: '6', position: 'Joker' },
-  { id: 11, name: 'Jorge', number: '7', position: 'Joker' },
-  { id: 12, name: 'Jugador 12', number: '0', position: 'Unselected' },
-];
-
-const createInitialPlayerState = (player) => ({
-  ...player,
-  onCourt: false,
-  currentMinutes: 0,
-  totalCourtTime: 0,
-  totalBenchTime: 0,
-  fouls: 0,
-  points: 0,
-  lastToggle: null,
-  stints: [],
-  stintPlusMinus: [],
-  currentStintStart: null
-});
-
-const INITIAL_PARTIAL_SCORES = {
-  1: { first: { us: 0, them: 0, locked: false }, second: { us: 0, them: 0, locked: false } },
-  2: { first: { us: 0, them: 0, locked: false }, second: { us: 0, them: 0, locked: false } },
-  3: { first: { us: 0, them: 0, locked: false }, second: { us: 0, them: 0, locked: false } },
-  4: { first: { us: 0, them: 0, locked: false }, second: { us: 0, them: 0, locked: false } }
-};
-
-// ============================================
-// FUNCIONES AUXILIARES (fuera del componente)
-// ============================================
-const getFoulStatus = (fouls, quarter) => {
-  if (quarter === 1) return fouls === 0 ? 'safe' : fouls === 1 ? 'warning' : 'danger';
-  if (quarter === 2) return fouls <= 1 ? 'safe' : fouls === 2 ? 'warning' : 'danger';
-  if (quarter === 3) return fouls <= 2 ? 'safe' : fouls === 3 ? 'warning' : 'danger';
-  return fouls <= 2 ? 'safe' : fouls === 3 ? 'warning' : 'danger';
-};
-
-const formatTime = (minutes) => {
-  const mins = Math.floor(minutes);
-  const secs = Math.floor((minutes % 1) * 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
-
-const formatGameTime = (seconds) => {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
-
-const getFoulBgClass = (fouls, quarter) => {
-  const status = getFoulStatus(fouls, quarter);
-  if (fouls >= 5) return 'bg-red-800 border-2 border-red-400';
-  return status === 'safe' ? 'bg-green-700 border-2 border-green-400' : status === 'warning' ? 'bg-yellow-600 border-2 border-yellow-300' : 'bg-red-700 border-2 border-red-400';
-};
-
-const getQuintetKey = (playerIds) => [...playerIds].sort((a, b) => a - b).join('-');
-
-// ============================================
-// COMPONENTE PLAYERCARD (memo para optimización)
-// ============================================
-const PlayerCard = memo(({
-  player,
-  isRosterView,
-  currentQuarter,
-  editingPlayer,
-  editingStats,
-  editForm,
-  statsForm,
-  onEditFormChange,
-  onStatsFormChange,
-  onStartEditing,
-  onStartEditingStats,
-  onSaveEdit,
-  onSaveStats,
-  onCancelEdit,
-  onToggleCourt,
-  getCourtTimeStatus,
-  getBenchTimeStatus
-}) => {
-  const isFouledOut = player.fouls >= 5;
-  const isUnselected = player.position === 'Unselected';
-  const isEditing = editingPlayer === player.id;
-  const isEditingStatsMode = editingStats === player.id;
-  const foulBgClass = getFoulBgClass(player.fouls, currentQuarter);
-  const longPressTimer = useRef(null);
-
-  // Calcular el borde según tiempo
-  const getTimeBorderClass = () => {
-    if (isUnselected) return 'border-gray-500';
-    if (player.onCourt) {
-      const status = getCourtTimeStatus(player);
-      return status === 'green' ? 'border-green-500' : status === 'yellow' ? 'border-yellow-500' : 'border-red-500';
-    } else {
-      const status = getBenchTimeStatus(player);
-      return status === 'green' ? 'border-green-500' : status === 'yellow' ? 'border-yellow-500' : 'border-red-500';
-    }
-  };
-
-  const borderClass = getTimeBorderClass();
-  const dimClass = isRosterView && player.onCourt ? 'opacity-25' : '';
-
-  // Long press handlers para el botón de editar
-  const handleEditMouseDown = () => {
-    longPressTimer.current = setTimeout(() => {
-      onStartEditingStats(player);
-    }, 600);
-  };
-
-  const handleEditMouseUp = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      // Si no fue long press, hacer edición normal
-      if (!isEditingStatsMode) {
-        onStartEditing(player);
-      }
-    }
-  };
-
-  const handleEditMouseLeave = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-    }
-  };
-
-  // Modo edición de stats (long press)
-  if (isEditingStatsMode) {
-    return (
-      <div className="rounded-lg p-2 border-2 border-orange-500 bg-orange-900">
-        <div className="text-xs font-bold text-orange-300 mb-2 text-center">Editar Stats</div>
-        <div className="space-y-1">
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-gray-300 w-12">🏀 Pista:</span>
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              value={statsForm.totalCourtTime}
-              onChange={(e) => onStatsFormChange({...statsForm, totalCourtTime: parseFloat(e.target.value) || 0})}
-              className="flex-1 bg-gray-800 text-white px-2 py-1 rounded text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-gray-300 w-12">💺 Banco:</span>
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              value={statsForm.totalBenchTime}
-              onChange={(e) => onStatsFormChange({...statsForm, totalBenchTime: parseFloat(e.target.value) || 0})}
-              className="flex-1 bg-gray-800 text-white px-2 py-1 rounded text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-gray-300 w-12">Faltas:</span>
-            <input
-              type="number"
-              min="0"
-              max="5"
-              value={statsForm.fouls}
-              onChange={(e) => onStatsFormChange({...statsForm, fouls: parseInt(e.target.value) || 0})}
-              className="flex-1 bg-gray-800 text-white px-2 py-1 rounded text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-gray-300 w-12">Puntos:</span>
-            <input
-              type="number"
-              min="0"
-              value={statsForm.points}
-              onChange={(e) => onStatsFormChange({...statsForm, points: parseInt(e.target.value) || 0})}
-              className="flex-1 bg-gray-800 text-white px-2 py-1 rounded text-xs"
-            />
-          </div>
-        </div>
-        <div className="flex gap-1 mt-2">
-          <button onClick={onSaveStats} className="flex-1 py-1 bg-green-600 rounded text-xs font-bold">✓ Guardar</button>
-          <button onClick={onCancelEdit} className="flex-1 py-1 bg-red-600 rounded text-xs font-bold">✗ Cancelar</button>
-        </div>
-      </div>
-    );
-  }
-
-  // Modo edición normal (click corto)
-  if (isEditing) {
-    return (
-      <div className="rounded-lg p-2 border-2 border-purple-500 bg-purple-900">
-        <input
-          type="text"
-          value={editForm.name}
-          onChange={(e) => onEditFormChange({...editForm, name: e.target.value})}
-          className="w-full bg-gray-800 text-white px-2 py-1 rounded text-xs mb-1"
-          placeholder="Nombre"
-        />
-        <input
-          type="text"
-          value={editForm.number}
-          onChange={(e) => onEditFormChange({...editForm, number: e.target.value})}
-          className="w-full bg-gray-800 text-white px-2 py-1 rounded text-xs mb-1"
-          placeholder="#"
-        />
-        <select
-          value={editForm.position}
-          onChange={(e) => onEditFormChange({...editForm, position: e.target.value})}
-          className="w-full bg-gray-800 text-white px-2 py-1 rounded text-xs mb-1"
-        >
-          <option value="Base">Base</option>
-          <option value="Alero">Alero</option>
-          <option value="Joker">Joker</option>
-          <option value="Unselected">No</option>
-        </select>
-        <div className="flex gap-1">
-          <button onClick={onSaveEdit} className="flex-1 py-1 bg-green-600 rounded text-xs font-bold">✓</button>
-          <button onClick={onCancelEdit} className="flex-1 py-1 bg-red-600 rounded text-xs font-bold">✗</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`rounded-lg p-1.5 sm:p-2 border-3 ${borderClass} ${player.onCourt ? 'bg-blue-700' : isUnselected ? 'bg-gray-700 opacity-50' : 'bg-gray-800'} ${dimClass}`}>
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-1 min-w-0 flex-1">
-          <span className="text-xs font-black text-white bg-black/30 px-1 rounded">#{player.number}</span>
-          <span className="text-xs font-bold text-white truncate">{player.name}</span>
-        </div>
-        <button
-          onMouseDown={handleEditMouseDown}
-          onMouseUp={handleEditMouseUp}
-          onMouseLeave={handleEditMouseLeave}
-          onTouchStart={handleEditMouseDown}
-          onTouchEnd={handleEditMouseUp}
-          className="p-0.5 ml-1 flex-shrink-0"
-        >
-          <Edit3 className="w-3 h-3 text-gray-400" />
-        </button>
-      </div>
-
-      {isFouledOut && <div className="bg-red-500 text-white text-center py-0.5 rounded mb-1 text-xs font-bold">OUT</div>}
-
-      <div className="flex gap-1 mb-1">
-        <div className="flex-1 bg-black/30 rounded px-1 py-1 text-center min-w-0">
-          <div className="text-sm sm:text-base font-black text-white tabular-nums">{formatTime(player.currentMinutes)}</div>
-        </div>
-        <div className={`${foulBgClass} rounded px-2 py-1 flex items-center justify-center min-w-[32px]`}>
-          <span className="text-sm sm:text-base font-black text-white">{player.fouls}</span>
-        </div>
-      </div>
-
-      <div className="flex gap-1 mb-1">
-        <div className="flex-1 bg-black/20 rounded px-1 py-1 text-center min-w-0">
-          <div className="text-sm leading-none mb-0.5">🏀</div>
-          <div className="text-xs font-bold text-gray-300 tabular-nums">{formatTime(player.totalCourtTime)}</div>
-        </div>
-        <div className="flex-1 bg-black/20 rounded px-1 py-1 text-center min-w-0">
-          <div className="text-sm leading-none mb-0.5">💺</div>
-          <div className="text-xs font-bold text-gray-300 tabular-nums">{formatTime(player.totalBenchTime)}</div>
-        </div>
-      </div>
-
-      <div className="bg-orange-600/50 border border-orange-400 rounded px-1 py-0.5 mb-1 text-center">
-        <span className="text-xs font-bold text-orange-200">{player.points} pts</span>
-      </div>
-
-      <button
-        onClick={() => onToggleCourt(player.id)}
-        disabled={isFouledOut || isUnselected || (isRosterView && player.onCourt)}
-        className={`w-full py-1.5 rounded font-bold text-xs ${isFouledOut || isUnselected || (isRosterView && player.onCourt) ? 'bg-gray-600 opacity-50' : player.onCourt ? 'bg-orange-600 active:bg-orange-500' : 'bg-green-600 active:bg-green-500'}`}
-      >
-        {isUnselected ? 'N/A' : player.onCourt ? 'OUT' : 'IN'}
-      </button>
-    </div>
-  );
-});
-
-PlayerCard.displayName = 'PlayerCard';
 
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
-export default function BasketballRotationTracker({ initialPlayers, onExit, onGameSaved, savedGameData }) {
-  // Jugadores: usar initialPlayers prop o los hardcoded por defecto
-  const effectivePlayers = initialPlayers || INITIAL_PLAYERS;
+export default function BasketballRotationTracker({ initialPlayers, onExit, onGameSaved, savedGameData, teamId, userId }) {
+  // Jugadores: usar initialPlayers prop
+  const effectivePlayers = initialPlayers || [];
 
   // Estado para saber si ya cargamos datos guardados
   const [isInitialized, setIsInitialized] = useState(false);
@@ -362,7 +29,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   // Si nos pasan savedGameData, ir directo al partido; si no, a seleccion de equipo
   const [currentScreen, setCurrentScreen] = useState(() => savedGameData ? 'game' : 'team-selection');
   const [currentGameId, setCurrentGameId] = useState(() => savedGameData?.id || null);
-  const [showExitModal, setShowExitModal] = useState(false);
+  // Modal activo (null = ninguno, 'exit', 'reset', 'quarter', 'intervals', 'score', 'foul', 'fouledOut')
+  const [activeModal, setActiveModal] = useState(null);
 
   // Estados principales del juego
   const [gameStarted, setGameStarted] = useState(() => savedGameData?.gameStarted ?? false);
@@ -376,23 +44,17 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const [currentQuarter, setCurrentQuarter] = useState(() => savedGameData?.currentQuarter ?? 1);
 
   // Estados de UI
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showQuarterSelector, setShowQuarterSelector] = useState(false);
-  const [showIntervalsModal, setShowIntervalsModal] = useState(false);
-  const [showScoreModal, setShowScoreModal] = useState(false);
-  const [showFoulModal, setShowFoulModal] = useState(false);
-  const [showFouledOutModal, setShowFouledOutModal] = useState(false);
   const [selectedPoints, setSelectedPoints] = useState(null);
   const [editingTeam, setEditingTeam] = useState(null);
   const [editingScore, setEditingScore] = useState(null);
   const [editingGameTime, setEditingGameTime] = useState(false);
   const [editGameTimeForm, setEditGameTimeForm] = useState({ minutes: 0, seconds: 0 });
   const [editingPlayer, setEditingPlayer] = useState(null);
-  const [editingStats, setEditingStats] = useState(null);
   const [editForm, setEditForm] = useState({ name: '', number: '', position: '' });
-  const [statsForm, setStatsForm] = useState({ totalCourtTime: 0, totalBenchTime: 0, fouls: 0, points: 0 });
   const [isLongPress, setIsLongPress] = useState(false);
   const [fouledOutPlayer, setFouledOutPlayer] = useState(null);
+  const [courtWarning, setCourtWarning] = useState(null);
 
   // Configuración
   const [intervals, setIntervals] = useState(() => savedGameData?.intervals || { green: { minutes: 3, seconds: 0 }, yellow: { minutes: 4, seconds: 30 } });
@@ -415,86 +77,18 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const [ties, setTies] = useState(() => savedGameData?.ties ?? 0);
   const [biggestLead, setBiggestLead] = useState(() => savedGameData?.biggestLead || { us: 0, them: 0 });
   const [partialScores, setPartialScores] = useState(() => savedGameData?.partialScores || INITIAL_PARTIAL_SCORES);
+  const [eventLog, setEventLog] = useState(() => savedGameData?.eventLog || []);
 
   // Refs
   const longPressTimer = useRef(null);
-  const lastSaveTime = useRef(Date.now());
 
   // ============================================
   // AUTOGUARDADO Y RECUPERACIÓN
   // ============================================
 
-  // Migrar datos antiguos y configurar pantalla inicial
+  // Inicialización
   useEffect(() => {
-    try {
-      // Verificar si hay datos en formato antiguo (migración)
-      const oldData = localStorage.getItem(STORAGE_KEY);
-      if (oldData) {
-        const parsed = JSON.parse(oldData);
-
-        // Si tiene datos de un partido, migrarlo al nuevo formato
-        if (parsed.gameStarted) {
-          const newId = generateGameId();
-          const gameData = { ...parsed, id: newId };
-          saveGameData(newId, gameData);
-
-          addGameToList({
-            id: newId,
-            createdAt: parsed.savedAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            status: 'in_progress',
-            homeTeam: parsed.homeTeam || 'Home',
-            awayTeam: parsed.awayTeam || 'Away',
-            homeScore: parsed.homeScore || 0,
-            awayScore: parsed.awayScore || 0,
-            isHomeTeam: parsed.isHomeTeam,
-            currentQuarter: parsed.currentQuarter || 1
-          });
-
-          console.log('✅ Datos migrados al nuevo formato');
-        }
-
-        // Eliminar formato antiguo
-        localStorage.removeItem(STORAGE_KEY);
-      }
-    } catch (error) {
-      console.error('Error en migración:', error);
-    }
-
     setIsInitialized(true);
-  }, []);
-
-  // Función para cargar un partido completo
-  const loadGame = useCallback((gameId) => {
-    const data = loadGameData(gameId);
-    if (!data) return;
-
-    setCurrentGameId(gameId);
-    setGameStarted(data.gameStarted ?? false);
-    setIsHomeTeam(data.isHomeTeam);
-    setPlayers(data.players || effectivePlayers.map(createInitialPlayerState));
-    setGameRunning(false); // Siempre pausado al cargar
-    setGameTime(data.gameTime ?? 600);
-    setCurrentQuarter(data.currentQuarter ?? 1);
-    setIntervals(data.intervals || { green: { minutes: 3, seconds: 0 }, yellow: { minutes: 4, seconds: 30 } });
-    setBenchIntervals(data.benchIntervals || { red: { minutes: 3, seconds: 0 }, yellow: { minutes: 4, seconds: 30 } });
-    setHomeTeam(data.homeTeam || 'Home');
-    setAwayTeam(data.awayTeam || 'Away');
-    setHomeScore(data.homeScore ?? 0);
-    setAwayScore(data.awayScore ?? 0);
-    setRotationHistory(data.rotationHistory || []);
-    setActionHistory(data.actionHistory || []);
-    setQuintetHistory(data.quintetHistory || []);
-    setCurrentQuintet(data.currentQuintet || null);
-    setSubstitutionsByQuarter(data.substitutionsByQuarter || { 1: 0, 2: 0, 3: 0, 4: 0 });
-    setScoresByQuarter(data.scoresByQuarter || { 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } });
-    setLeadChanges(data.leadChanges ?? 0);
-    setTies(data.ties ?? 0);
-    setBiggestLead(data.biggestLead || { us: 0, them: 0 });
-    setPartialScores(data.partialScores || INITIAL_PARTIAL_SCORES);
-
-    setCurrentScreen('game');
-    console.log('✅ Partido cargado:', gameId);
   }, []);
 
   // Función para crear nuevo partido
@@ -523,83 +117,46 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setTies(0);
     setBiggestLead({ us: 0, them: 0 });
     setPartialScores(INITIAL_PARTIAL_SCORES);
-
-    // Añadir a la lista de partidos (localStorage legacy)
-    addGameToList({
-      id: newId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      status: 'in_progress',
-      homeTeam: 'Home',
-      awayTeam: 'Away',
-      homeScore: 0,
-      awayScore: 0,
-      isHomeTeam: isHome,
-      currentQuarter: 1
-    });
+    setEventLog([]);
 
     setCurrentScreen('game');
-  }, [effectivePlayers]);
 
-  // Función para guardar estado del partido actual
-  const saveState = useCallback(() => {
-    if (!isInitialized || !currentGameId) return;
-
-    try {
-      const stateToSave = {
-        id: currentGameId,
-        gameStarted,
-        isHomeTeam,
-        players,
-        gameRunning,
-        gameTime,
-        currentQuarter,
-        intervals,
-        benchIntervals,
-        homeTeam,
-        awayTeam,
-        homeScore,
-        awayScore,
-        rotationHistory,
-        actionHistory,
-        quintetHistory,
-        currentQuintet,
-        substitutionsByQuarter,
-        scoresByQuarter,
-        leadChanges,
-        ties,
-        biggestLead,
-        partialScores,
+    // Bug 1 fix: Guardar en Supabase inmediatamente al crear partido
+    if (onGameSaved) {
+      const initialState = {
+        id: newId,
+        gameStarted: true,
+        isHomeTeam: isHome,
+        players: effectivePlayers.map(createInitialPlayerState),
+        gameRunning: false,
+        gameTime: 600,
+        currentQuarter: 1,
+        homeTeam: 'Home',
+        awayTeam: 'Away',
+        homeScore: 0,
+        awayScore: 0,
+        rotationHistory: [],
+        actionHistory: [],
+        quintetHistory: [],
+        currentQuintet: null,
+        substitutionsByQuarter: { 1: 0, 2: 0, 3: 0, 4: 0 },
+        scoresByQuarter: { 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } },
+        leadChanges: 0,
+        ties: 0,
+        biggestLead: { us: 0, them: 0 },
+        partialScores: INITIAL_PARTIAL_SCORES,
+        eventLog: [],
+        version: 2,
+        status: 'in_progress',
         savedAt: Date.now()
       };
-
-      // Guardar datos completos del partido
-      saveGameData(currentGameId, stateToSave);
-
-      // Actualizar info en la lista
-      updateGameInList({
-        id: currentGameId,
-        updatedAt: new Date().toISOString(),
-        homeTeam,
-        awayTeam,
-        homeScore,
-        awayScore,
-        currentQuarter
-      });
-
-      lastSaveTime.current = Date.now();
-    } catch (error) {
-      console.error('Error guardando estado:', error);
+      onGameSaved(initialState).catch(err => console.error('Error guardando partido nuevo en Supabase:', err));
     }
-  }, [
-    isInitialized, currentGameId, gameStarted, isHomeTeam, players, gameRunning, gameTime, currentQuarter,
-    intervals, benchIntervals, homeTeam, awayTeam, homeScore, awayScore,
-    rotationHistory, actionHistory, quintetHistory, currentQuintet,
-    substitutionsByQuarter, scoresByQuarter, leadChanges, ties, biggestLead, partialScores
-  ]);
+  }, [effectivePlayers, onGameSaved]);
 
   // Obtener estado completo del partido para sincronizar
   const getFullGameState = useCallback(() => ({
+    version: 2,
     id: currentGameId,
     gameStarted,
     isHomeTeam,
@@ -623,84 +180,108 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     ties,
     biggestLead,
     partialScores,
+    eventLog,
     savedAt: Date.now()
   }), [
     currentGameId, gameStarted, isHomeTeam, players, gameTime, currentQuarter,
     intervals, benchIntervals, homeTeam, awayTeam, homeScore, awayScore,
     rotationHistory, actionHistory, quintetHistory, currentQuintet,
-    substitutionsByQuarter, scoresByQuarter, leadChanges, ties, biggestLead, partialScores
+    substitutionsByQuarter, scoresByQuarter, leadChanges, ties, biggestLead, partialScores,
+    eventLog
   ]);
 
   // Guardar y volver
   const saveAndExit = useCallback(async () => {
-    saveState();
     const gameState = getFullGameState();
     gameState.status = 'in_progress';
     if (onGameSaved) await onGameSaved(gameState);
-    setShowExitModal(false);
+    setActiveModal(null);
     if (onExit) {
       onExit();
     } else {
-      setCurrentScreen('home');
+      setCurrentScreen('team-selection');
       setCurrentGameId(null);
       setGameStarted(false);
     }
-  }, [saveState, getFullGameState, onExit, onGameSaved]);
+  }, [getFullGameState, onExit, onGameSaved]);
 
   // Finalizar partido y volver
   const finishGame = useCallback(async () => {
-    saveState();
     const gameState = getFullGameState();
     gameState.status = 'completed';
     if (onGameSaved) await onGameSaved(gameState);
 
-    // Marcar como completado en localStorage legacy
-    updateGameInList({
-      id: currentGameId,
-      status: 'completed',
-      updatedAt: new Date().toISOString()
-    });
-
-    setShowExitModal(false);
+    setActiveModal(null);
     if (onExit) {
       onExit();
     } else {
-      setCurrentScreen('home');
+      setCurrentScreen('team-selection');
       setCurrentGameId(null);
       setGameStarted(false);
     }
-  }, [saveState, getFullGameState, currentGameId, onExit, onGameSaved]);
+  }, [getFullGameState, onExit, onGameSaved]);
 
-  // Eliminar partido del historial
-  const deleteGame = useCallback((gameId) => {
-    removeGameFromList(gameId);
-  }, []);
-
-  // Autoguardado periódico
+  // Autoguardado periódico (solo Supabase)
   useEffect(() => {
     if (!isInitialized || !currentGameId || currentScreen !== 'game') return;
 
     const interval = setInterval(() => {
-      saveState();
-      // Sincronizar con Supabase via callback
       if (onGameSaved) {
         const state = getFullGameState();
         state.status = 'in_progress';
-        onGameSaved(state);
+        onGameSaved(state).catch(err => console.error('Error en autosave a Supabase:', err));
       }
     }, AUTOSAVE_INTERVAL);
 
     return () => clearInterval(interval);
-  }, [isInitialized, currentGameId, currentScreen, saveState, onGameSaved, getFullGameState]);
+  }, [isInitialized, currentGameId, currentScreen, onGameSaved, getFullGameState]);
 
   // Guardar al cerrar ventana o cambiar de pestaña
   useEffect(() => {
     if (!isInitialized || !currentGameId || currentScreen !== 'game') return;
 
+    // Helper para guardar en Supabase con encolado como respaldo
+    let lastCloudSave = 0;
+    const saveToCloud = (reason) => {
+      const now = Date.now();
+      // Debounce: no guardar en la nube más de una vez cada 2 segundos
+      if (now - lastCloudSave < 2000) return;
+      lastCloudSave = now;
+
+      if (onGameSaved) {
+        const state = getFullGameState();
+        state.status = 'in_progress';
+        onGameSaved(state).catch(err => {
+          console.error(`Error guardando en Supabase (${reason}):`, err);
+        });
+      }
+    };
+
     // Guardar cuando el usuario cierra la ventana/pestaña
     const handleBeforeUnload = (e) => {
-      saveState();
-      // Algunos navegadores requieren esto para mostrar diálogo de confirmación
+      // Intentar guardar en Supabase (fire-and-forget, puede no completar)
+      saveToCloud('beforeunload');
+      // Encolar en syncManager como respaldo (se procesará al reabrir la app)
+      if (currentGameId && teamId && userId) {
+        const state = getFullGameState();
+        addToQueue({
+          type: 'upsert_game',
+          data: {
+            id: currentGameId,
+            team_id: teamId,
+            created_by: userId,
+            status: 'in_progress',
+            home_team: state.homeTeam || 'Home',
+            away_team: state.awayTeam || 'Away',
+            home_score: state.homeScore || 0,
+            away_score: state.awayScore || 0,
+            is_home_team: state.isHomeTeam ?? true,
+            current_quarter: state.currentQuarter || 1,
+            game_data: state,
+            updated_at: new Date().toISOString()
+          }
+        });
+      }
       e.preventDefault();
       e.returnValue = '';
     };
@@ -708,13 +289,16 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     // Guardar cuando el usuario cambia de pestaña (útil en móviles)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        saveState();
+        saveToCloud('visibilitychange');
       }
     };
 
-    // Guardar cuando la app pierde el foco (útil en móviles)
+    // Guardar cuando la app pierde el foco
     const handleBlur = () => {
-      saveState();
+      // Solo guardar en la nube si la página está oculta (evita disparos innecesarios en desktop)
+      if (document.visibilityState === 'hidden') {
+        saveToCloud('blur');
+      }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -726,18 +310,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [isInitialized, currentGameId, currentScreen, saveState]);
-
-  // Guardar al cambiar estados importantes
-  useEffect(() => {
-    if (isInitialized && currentGameId && currentScreen === 'game') {
-      // Debounce: solo guardar si pasaron más de 1 segundo desde el último guardado
-      const now = Date.now();
-      if (now - lastSaveTime.current > 1000) {
-        saveState();
-      }
-    }
-  }, [homeScore, awayScore, players, currentQuarter, gameTime, isInitialized, currentGameId, currentScreen, saveState]);
+  }, [isInitialized, currentGameId, currentScreen, onGameSaved, getFullGameState, teamId, userId]);
 
   // ============================================
   // FUNCIONES MEMOIZADAS
@@ -894,8 +467,6 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const subRecommendations = useMemo(() => {
     const recommendations = [];
     const benchPlayers = players.filter(p => !p.onCourt && p.fouls < 5 && getFoulStatus(p.fouls, currentQuarter) === 'safe' && p.position !== 'Unselected');
-    const jokersOnCourt = onCourtPlayers.filter(p => p.position === 'Joker').length;
-    const flexibleJokers = ['Jorge', 'Unai'];
 
     onCourtPlayers.forEach(player => {
       const courtStatus = getCourtTimeStatus(player);
@@ -907,20 +478,27 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         let samePositionBench = benchPlayers.filter(p => p.position === player.position);
         let crossPositionSuggestions = [];
 
-        if (player.position === 'Alero') {
-          const flexibleJokersOnBench = benchPlayers.filter(p =>
-            p.position === 'Joker' && flexibleJokers.includes(p.name)
-          );
-
-          if (jokersOnCourt >= 1) {
-            crossPositionSuggestions = flexibleJokersOnBench.map(p => ({
-              ...p,
-              isPlayingOutOfPosition: true,
-              originalPosition: 'Joker',
-              playingAs: 'Alero'
-            }));
+        // Buscar jugadores en banquillo cuya secondary_positions incluya la posición del jugador a sacar
+        benchPlayers.forEach(bp => {
+          const secondaryPositions = bp.secondary_positions || [];
+          if (secondaryPositions.includes(player.position) && bp.position !== player.position) {
+            // Guardia: solo sugerir si hay otro jugador de su posición primaria en banquillo sin problemas de faltas
+            // (el tiempo de banquillo se ignora, es cuestión de necesidad)
+            const hasCover = players.some(p =>
+              !p.onCourt && p.id !== bp.id && p.position === bp.position &&
+              p.fouls < 5 && getFoulStatus(p.fouls, currentQuarter) !== 'danger' &&
+              p.position !== 'Unselected'
+            );
+            if (hasCover) {
+              crossPositionSuggestions.push({
+                ...bp,
+                isPlayingOutOfPosition: true,
+                originalPosition: bp.position,
+                playingAs: player.position
+              });
+            }
           }
-        }
+        });
 
         if (samePositionBench.length > 0 || crossPositionSuggestions.length > 0) {
           const statusOrder = { green: 0, yellow: 1, red: 2 };
@@ -959,9 +537,34 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     if (!fouledOutPlayer) return [];
     const benchPlayers = players.filter(p => !p.onCourt && p.fouls < 5 && getFoulStatus(p.fouls, currentQuarter) === 'safe' && p.position !== 'Unselected');
     const statusOrder = { green: 0, yellow: 1, red: 2 };
-    return benchPlayers
+
+    // Misma posición
+    const samePosition = benchPlayers
       .filter(p => p.position === fouledOutPlayer.position)
       .sort((a, b) => statusOrder[getBenchTimeStatus(a)] - statusOrder[getBenchTimeStatus(b)]);
+
+    // Posición secundaria: sugerir si hay otro jugador de su posición primaria en banquillo sin problemas de faltas
+    const crossPosition = benchPlayers
+      .filter(p => {
+        if (p.position === fouledOutPlayer.position) return false;
+        const secondaryPositions = p.secondary_positions || [];
+        if (!secondaryPositions.includes(fouledOutPlayer.position)) return false;
+        // Guardia: hay cover en banquillo para su posición primaria (ignorar tiempo, solo faltas)
+        return players.some(bp =>
+          !bp.onCourt && bp.id !== p.id && bp.position === p.position &&
+          bp.fouls < 5 && getFoulStatus(bp.fouls, currentQuarter) !== 'danger' &&
+          bp.position !== 'Unselected'
+        );
+      })
+      .map(p => ({
+        ...p,
+        isPlayingOutOfPosition: true,
+        originalPosition: p.position,
+        playingAs: fouledOutPlayer.position
+      }))
+      .sort((a, b) => statusOrder[getBenchTimeStatus(a)] - statusOrder[getBenchTimeStatus(b)]);
+
+    return [...samePosition, ...crossPosition];
   }, [fouledOutPlayer, players, currentQuarter, getBenchTimeStatus]);
 
   const getCurrentPartialScores = useCallback(() => {
@@ -1069,6 +672,15 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       type: 'substitution',
       playerId,
       wasOnCourt: player.onCourt,
+      previousPlayerState: {
+        currentMinutes: player.currentMinutes,
+        lastToggle: player.lastToggle,
+        totalCourtTime: player.totalCourtTime,
+        totalBenchTime: player.totalBenchTime,
+        stints: [...player.stints],
+        stintPlusMinus: [...player.stintPlusMinus],
+        currentStintStart: player.currentStintStart
+      },
       scoreAtAction: { ourScore, rivalScore }
     }]);
 
@@ -1126,7 +738,10 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
 
   const toggleGameRunning = useCallback(() => {
     const currentOnCourtCount = players.filter(p => p.onCourt).length;
-    if (!gameRunning && currentOnCourtCount !== 5) return;
+    if (!gameRunning && currentOnCourtCount !== 5) {
+      setCourtWarning(`Faltan ${5 - currentOnCourtCount} jugadores en pista`);
+      return;
+    }
 
     const { ourScore, rivalScore } = getCurrentScores();
 
@@ -1142,21 +757,37 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setGameRunning(!gameRunning);
   }, [players, gameRunning, getCurrentScores, currentQuintet, startNewQuintet, endCurrentQuintet]);
 
-  const addFoulToPlayer = useCallback((playerId) => {
+  const adjustFouls = useCallback((playerId, delta) => {
     const player = players.find(p => p.id === playerId);
-    if (!player || player.fouls >= 5) return;
+    if (!player) return;
 
-    const newFouls = player.fouls + 1;
+    const newFouls = Math.max(0, Math.min(5, player.fouls + delta));
+    if (newFouls === player.fouls) return;
+
     const { ourScore, rivalScore } = getCurrentScores();
 
     setActionHistory(prev => [...prev, {
       type: 'foul',
       playerId,
-      delta: 1,
+      delta,
       previousFouls: player.fouls,
       wasOnCourt: player.onCourt,
       scoreAtAction: { ourScore, rivalScore }
     }]);
+    if (delta > 0) {
+      setEventLog(prev => [...prev, {
+        timestamp: Date.now(),
+        gameTime,
+        quarter: currentQuarter,
+        type: 'foul',
+        team: isHomeTeam ? 'home' : 'away',
+        playerId,
+        assistById: null,
+        value: delta,
+        playType: null,
+        lineupOnCourt: players.filter(p => p.onCourt).map(p => p.id)
+      }]);
+    }
 
     if (newFouls >= 5 && player.onCourt) {
       endCurrentQuintet(ourScore, rivalScore);
@@ -1186,13 +817,16 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         player: `#${player.number} ${player.name}`
       }]);
       setFouledOutPlayer({...player, fouls: newFouls});
-      setShowFoulModal(false);
-      setShowFouledOutModal(true);
+      setActiveModal('fouledOut');
     } else {
       setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, fouls: newFouls } : p));
-      setShowFoulModal(false);
     }
-  }, [players, getCurrentScores, endCurrentQuintet, currentQuarter, gameRunning]);
+  }, [players, getCurrentScores, endCurrentQuintet, currentQuarter, gameRunning, gameTime, isHomeTeam]);
+
+  const addFoulToPlayer = useCallback((playerId) => {
+    adjustFouls(playerId, 1);
+    setActiveModal(null);
+  }, [adjustFouls]);
 
   const undoLastAction = useCallback(() => {
     if (actionHistory.length === 0) return;
@@ -1235,11 +869,13 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       if (lastAction.previousFouls === 4 && lastAction.wasOnCourt) {
         setRotationHistory(prev => prev.slice(0, -1));
         setFouledOutPlayer(null);
-        setShowFouledOutModal(false);
+        setActiveModal(null);
       }
     } else if (lastAction.type === 'substitution') {
       setPlayers(prev => prev.map(p =>
-        p.id === lastAction.playerId ? { ...p, onCourt: lastAction.wasOnCourt, currentMinutes: 0 } : p
+        p.id === lastAction.playerId
+          ? { ...p, onCourt: lastAction.wasOnCourt, ...(lastAction.previousPlayerState || { currentMinutes: 0 }) }
+          : p
       ));
       setRotationHistory(prev => prev.slice(0, -1));
       setSubstitutionsByQuarter(prev => ({
@@ -1248,8 +884,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       }));
     } else if (lastAction.type === 'swap') {
       setPlayers(prev => prev.map(p => {
-        if (p.id === lastAction.outId) return { ...p, onCourt: true, currentMinutes: 0 };
-        if (p.id === lastAction.inId) return { ...p, onCourt: false, currentMinutes: 0 };
+        if (p.id === lastAction.outId) return { ...p, onCourt: true, ...(lastAction.previousOutPlayerState || { currentMinutes: 0 }) };
+        if (p.id === lastAction.inId) return { ...p, onCourt: false, ...(lastAction.previousInPlayerState || { currentMinutes: 0 }) };
         return p;
       }));
       setRotationHistory(prev => prev.slice(0, -2));
@@ -1259,6 +895,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       }));
     }
 
+    // Remove corresponding eventLog entry for score/foul actions
+    if (lastAction.type === 'score' || (lastAction.type === 'foul' && lastAction.delta > 0)) {
+      setEventLog(prev => prev.slice(0, -1));
+    }
+
     setActionHistory(prev => prev.slice(0, -1));
   }, [actionHistory, isHomeTeam, currentQuarter]);
 
@@ -1266,7 +907,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setIsLongPress(false);
     longPressTimer.current = setTimeout(() => {
       setIsLongPress(true);
-      setShowResetConfirm(true);
+      setActiveModal('reset');
     }, 800);
   }, []);
 
@@ -1280,17 +921,12 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   }, []);
 
   const confirmReset = useCallback(() => {
-    // Eliminar el partido actual del historial
-    if (currentGameId) {
-      removeGameFromList(currentGameId);
-    }
-
     // Resetear todos los estados
     setPlayers(effectivePlayers.map(createInitialPlayerState));
     setGameTime(600);
     setCurrentQuarter(1);
     setGameRunning(false);
-    setShowResetConfirm(false);
+    setActiveModal(null);
     setRotationHistory([]);
     setHomeTeam('Home');
     setAwayTeam('Away');
@@ -1300,7 +936,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setIsHomeTeam(null);
     setActionHistory([]);
     setFouledOutPlayer(null);
-    setShowFouledOutModal(false);
+    setActiveModal(null);
     setQuintetHistory([]);
     setCurrentQuintet(null);
     setSubstitutionsByQuarter({ 1: 0, 2: 0, 3: 0, 4: 0 });
@@ -1309,15 +945,16 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setTies(0);
     setBiggestLead({ us: 0, them: 0 });
     setPartialScores(INITIAL_PARTIAL_SCORES);
+    setEventLog([]);
 
     // Volver
     setCurrentGameId(null);
     if (onExit) {
       onExit();
     } else {
-      setCurrentScreen('home');
+      setCurrentScreen('team-selection');
     }
-  }, [currentGameId, effectivePlayers, onExit]);
+  }, [effectivePlayers, onExit]);
 
   const addPoints = useCallback((playerId) => {
     const { ourScore, rivalScore } = getCurrentScores();
@@ -1328,6 +965,18 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       playerId,
       points: selectedPoints,
       isOurTeam: true
+    }]);
+    setEventLog(prev => [...prev, {
+      timestamp: Date.now(),
+      gameTime,
+      quarter: currentQuarter,
+      type: 'score',
+      team: isHomeTeam ? 'home' : 'away',
+      playerId,
+      assistById: null,
+      value: selectedPoints,
+      playType: null,
+      lineupOnCourt: players.filter(p => p.onCourt).map(p => p.id)
     }]);
     setPlayers(prev => prev.map(p =>
       p.id === playerId ? { ...p, points: p.points + selectedPoints } : p
@@ -1343,9 +992,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         us: prev[currentQuarter].us + selectedPoints
       }
     }));
-    setShowScoreModal(false);
+    setActiveModal(null);
     setSelectedPoints(null);
-  }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter]);
+  }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter, gameTime, players]);
 
   const addRivalPoints = useCallback(() => {
     const { ourScore, rivalScore } = getCurrentScores();
@@ -1356,6 +1005,18 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       playerId: null,
       points: selectedPoints,
       isOurTeam: false
+    }]);
+    setEventLog(prev => [...prev, {
+      timestamp: Date.now(),
+      gameTime,
+      quarter: currentQuarter,
+      type: 'score',
+      team: isHomeTeam ? 'away' : 'home',
+      playerId: null,
+      assistById: null,
+      value: selectedPoints,
+      playType: null,
+      lineupOnCourt: players.filter(p => p.onCourt).map(p => p.id)
     }]);
 
     if (isHomeTeam) setAwayScore(prev => prev + selectedPoints);
@@ -1368,9 +1029,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         them: prev[currentQuarter].them + selectedPoints
       }
     }));
-    setShowScoreModal(false);
+    setActiveModal(null);
     setSelectedPoints(null);
-  }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter]);
+  }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter, gameTime, players]);
 
   const executeSub = useCallback((outId, inId) => {
     const outPlayer = players.find(p => p.id === outId);
@@ -1388,6 +1049,24 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       type: 'swap',
       outId,
       inId,
+      previousOutPlayerState: {
+        currentMinutes: outPlayer.currentMinutes,
+        lastToggle: outPlayer.lastToggle,
+        totalCourtTime: outPlayer.totalCourtTime,
+        totalBenchTime: outPlayer.totalBenchTime,
+        stints: [...outPlayer.stints],
+        stintPlusMinus: [...outPlayer.stintPlusMinus],
+        currentStintStart: outPlayer.currentStintStart
+      },
+      previousInPlayerState: {
+        currentMinutes: inPlayer.currentMinutes,
+        lastToggle: inPlayer.lastToggle,
+        totalCourtTime: inPlayer.totalCourtTime,
+        totalBenchTime: inPlayer.totalBenchTime,
+        stints: [...inPlayer.stints],
+        stintPlusMinus: [...inPlayer.stintPlusMinus],
+        currentStintStart: inPlayer.currentStintStart
+      },
       scoreAtAction: { ourScore, rivalScore }
     }]);
     setSubstitutionsByQuarter(prev => ({
@@ -1439,7 +1118,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const subInPlayer = useCallback((playerId) => {
     toggleCourt(playerId);
     setFouledOutPlayer(null);
-    setShowFouledOutModal(false);
+    setActiveModal(null);
   }, [toggleCourt]);
 
   const startEditingPlayer = useCallback((player) => {
@@ -1458,39 +1137,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
 
   const cancelPlayerEdit = useCallback(() => {
     setEditingPlayer(null);
-    setEditingStats(null);
     setEditForm({ name: '', number: '', position: '' });
-    setStatsForm({ totalCourtTime: 0, totalBenchTime: 0, fouls: 0, points: 0 });
   }, []);
-
-  const startEditingStats = useCallback((player) => {
-    // Pausar el cronómetro al editar stats
-    setGameRunning(false);
-    setEditingStats(player.id);
-    setStatsForm({
-      totalCourtTime: player.totalCourtTime,
-      totalBenchTime: player.totalBenchTime,
-      fouls: player.fouls,
-      points: player.points
-    });
-  }, []);
-
-  const saveStatsEdit = useCallback(() => {
-    setPlayers(prev => prev.map(p =>
-      p.id === editingStats
-        ? {
-            ...p,
-            totalCourtTime: statsForm.totalCourtTime,
-            totalBenchTime: statsForm.totalBenchTime,
-            fouls: Math.min(5, Math.max(0, statsForm.fouls)),
-            points: Math.max(0, statsForm.points)
-          }
-        : p
-    ));
-    setEditingStats(null);
-    setStatsForm({ totalCourtTime: 0, totalBenchTime: 0, fouls: 0, points: 0 });
-    // El cronómetro queda pausado - el usuario debe darle a play para continuar
-  }, [editingStats, statsForm]);
 
   // ============================================
   // GENERAR REPORTE
@@ -1498,124 +1146,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const generateReport = useCallback(() => {
     const { ourScore, rivalScore } = getCurrentScores();
     if (currentQuintet && gameRunning) endCurrentQuintet(ourScore, rivalScore);
-
-    const playersWithCurrentStint = players.map(p => {
-      if (p.onCourt && p.currentStintStart) {
-        const currentPM = (ourScore - p.currentStintStart.ourScore) - (rivalScore - p.currentStintStart.rivalScore);
-        return {
-          ...p,
-          stints: [...p.stints, p.currentMinutes],
-          stintPlusMinus: [...p.stintPlusMinus, currentPM]
-        };
-      }
-      return p;
-    });
-
-    const quintetStats = {};
-    quintetHistory.forEach(q => {
-      if (!quintetStats[q.key]) {
-        quintetStats[q.key] = { playerIds: q.playerIds, totalTime: 0, totalPointsScored: 0, totalPointsAllowed: 0, occurrences: 0 };
-      }
-      quintetStats[q.key].totalTime += q.duration;
-      quintetStats[q.key].totalPointsScored += q.pointsScored;
-      quintetStats[q.key].totalPointsAllowed += q.pointsAllowed;
-      quintetStats[q.key].occurrences += 1;
-    });
-
-    const quintetArray = Object.values(quintetStats).map(q => ({
-      ...q,
-      differential: q.totalPointsScored - q.totalPointsAllowed,
-      playerNames: q.playerIds.map(id => {
-        const p = players.find(pl => pl.id === id);
-        return p ? `#${p.number} ${p.name}` : 'Unknown';
-      })
-    }));
-
-    const byTime = [...quintetArray].sort((a, b) => b.totalTime - a.totalTime);
-    const byDifferential = [...quintetArray].sort((a, b) => b.differential - a.differential);
-
-    const playerStintStats = playersWithCurrentStint.filter(p => p.position !== 'Unselected' && p.stints.length > 0).map(p => {
-      const totalPM = p.stintPlusMinus.reduce((a, b) => a + b, 0);
-      return {
-        name: `#${p.number} ${p.name}`,
-        position: p.position,
-        stintCount: p.stints.length,
-        stints: p.stints,
-        avgStint: p.stints.reduce((a, b) => a + b, 0) / p.stints.length,
-        totalTime: p.stints.reduce((a, b) => a + b, 0),
-        totalPlusMinus: totalPM
-      };
-    });
-
-    const totalSubs = Object.values(substitutionsByQuarter).reduce((a, b) => a + b, 0);
-    const realSubs = Math.max(0, totalSubs - 5);
-
-    const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report - ${ourTeamName} vs ${rivalTeamName}</title>
-<style>
-body{font-family:Arial,sans-serif;padding:20px;color:#333;font-size:12px;max-width:900px;margin:0 auto}
-h1{color:#f97316;border-bottom:3px solid #f97316;padding-bottom:10px;font-size:24px}
-h2{color:#3b82f6;margin-top:30px;border-bottom:2px solid #3b82f6;padding-bottom:5px;font-size:16px}
-table{width:100%;border-collapse:collapse;margin:15px 0;font-size:11px}
-th,td{border:1px solid #ddd;padding:8px;text-align:left}
-th{background-color:#1f2937;color:white}
-tr:nth-child(even){background-color:#f3f4f6}
-.score-box{display:inline-block;padding:15px 25px;background:linear-gradient(135deg,#1f2937,#374151);color:white;border-radius:10px;margin:5px;font-size:28px;font-weight:bold}
-.positive{color:#16a34a;font-weight:bold}
-.negative{color:#dc2626;font-weight:bold}
-.section{margin-bottom:30px}
-.stat-box{display:inline-block;background:#f3f4f6;padding:15px 20px;border-radius:8px;margin:10px;text-align:center}
-.stat-value{font-size:28px;font-weight:bold;color:#1f2937}
-.stat-label{font-size:11px;color:#6b7280;text-transform:uppercase;margin-top:5px}
-.stint-times{font-size:10px;color:#666}
-@media print{.section{page-break-inside:avoid}}
-</style></head><body>
-<h1>🏀 Game Report</h1>
-<div style="text-align:center;margin:20px 0">
-<div class="score-box">${ourTeamName}<br/>${ourScore}</div>
-<span style="font-size:24px;margin:0 15px;vertical-align:middle">VS</span>
-<div class="score-box">${rivalTeamName}<br/>${rivalScore}</div>
-</div>
-<div style="text-align:center;margin:30px 0">
-<div class="stat-box">
-<div class="stat-value">${realSubs}</div>
-<div class="stat-label">Cambios en el partido</div>
-</div>
-</div>
-<div class="section">
-<h2>👥 Quintetos - Tiempo compartido en pista</h2>
-<table>
-<tr><th>#</th><th>Jugadores</th><th>Tiempo juntos</th></tr>
-${byTime.map((q,i)=>`<tr><td>${i+1}</td><td>${q.playerNames.join(', ')}</td><td><strong>${formatTime(q.totalTime)}</strong></td></tr>`).join('')}
-</table>
-</div>
-<div class="section">
-<h2>📊 Quintetos - +/- en pista</h2>
-<table>
-<tr><th>#</th><th>Jugadores</th><th>Tiempo</th><th>A favor</th><th>En contra</th><th>+/-</th></tr>
-${byDifferential.map((q,i)=>`<tr><td>${i+1}</td><td>${q.playerNames.join(', ')}</td><td>${formatTime(q.totalTime)}</td><td>${q.totalPointsScored}</td><td>${q.totalPointsAllowed}</td><td class="${q.differential>=0?'positive':'negative'}" style="font-size:14px">${q.differential>=0?'+':''}${q.differential}</td></tr>`).join('')}
-</table>
-</div>
-<div class="section">
-<h2>⏱️ Stints por jugador</h2>
-<table>
-<tr><th>Jugador</th><th>Pos</th><th>Nº Stints</th><th>Duración de cada stint</th><th>Media</th><th>Total</th></tr>
-${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>${p.name}</strong></td><td>${p.position}</td><td style="text-align:center">${p.stintCount}</td><td class="stint-times">${p.stints.map(s => formatTime(s)).join(' → ')}</td><td><strong>${formatTime(p.avgStint)}</strong></td><td>${formatTime(p.totalTime)}</td></tr>`).join('')}
-</table>
-</div>
-<div style="margin-top:40px;text-align:center;color:#9ca3af;font-size:11px;border-top:1px solid #e5e7eb;padding-top:15px">
-<p>Basketball Rotation Tracker - ${new Date().toLocaleString()}</p>
-</div>
-</body></html>`;
-
-    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `report-${ourTeamName}-vs-${rivalTeamName}-${new Date().toISOString().split('T')[0]}.html`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    generateReportHTML({ ourScore, rivalScore, ourTeamName, rivalTeamName, players, quintetHistory, substitutionsByQuarter });
   }, [getCurrentScores, currentQuintet, gameRunning, endCurrentQuintet, players, quintetHistory, substitutionsByQuarter, ourTeamName, rivalTeamName]);
 
   // ============================================
@@ -1633,64 +1164,6 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
   }
 
   // ============================================
-  // RENDER - PANTALLA HOME (solo en modo legacy sin onExit)
-  // ============================================
-  if (currentScreen === 'home' && !onExit) {
-    const gamesList = getGamesList();
-    const inProgressGame = gamesList.find(g => g.status === 'in_progress');
-
-    return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
-        <div className="bg-gray-800 rounded-2xl p-6 sm:p-8 border-2 border-orange-500 max-w-md w-full">
-          <div className="flex items-center justify-center gap-2 mb-8">
-            <PlayStatsIcon className="w-8 h-8 text-orange-500" />
-            <h1 className="text-xl sm:text-2xl font-black text-orange-400">PlayStats Basketball</h1>
-          </div>
-
-          {inProgressGame && (
-            <button
-              onClick={() => loadGame(inProgressGame.id)}
-              className="w-full mb-4 bg-yellow-700 hover:bg-yellow-600 active:bg-yellow-500 rounded-xl p-4 border-2 border-yellow-400 text-left"
-            >
-              <div className="text-lg font-black flex items-center gap-2">
-                <Play className="w-5 h-5" /> CONTINUAR PARTIDO
-              </div>
-              <div className="text-sm text-yellow-200 mt-1">
-                {inProgressGame.homeTeam} {inProgressGame.homeScore} - {inProgressGame.awayScore} {inProgressGame.awayTeam}
-                <span className="ml-2 opacity-75">• Q{inProgressGame.currentQuarter}</span>
-              </div>
-            </button>
-          )}
-
-          <button
-            onClick={() => setCurrentScreen('team-selection')}
-            className="w-full mb-4 bg-green-700 hover:bg-green-600 active:bg-green-500 rounded-xl p-6 border-2 border-green-400"
-          >
-            <div className="text-3xl mb-2">🏀</div>
-            <div className="text-xl font-black">NUEVO PARTIDO</div>
-            <div className="text-sm text-green-300">Empezar a trackear</div>
-          </button>
-
-          <button
-            onClick={() => setCurrentScreen('history')}
-            className="w-full bg-blue-700 hover:bg-blue-600 active:bg-blue-500 rounded-xl p-6 border-2 border-blue-400"
-          >
-            <div className="text-3xl mb-2">📋</div>
-            <div className="text-xl font-black">VER PARTIDOS ({gamesList.length})</div>
-            <div className="text-sm text-blue-300">Historial guardado</div>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Si estamos en home pero tenemos onExit, volver al TeamDetail
-  if (currentScreen === 'home' && onExit) {
-    onExit();
-    return null;
-  }
-
-  // ============================================
   // RENDER - PANTALLA SELECCIÓN DE EQUIPO
   // ============================================
   if (currentScreen === 'team-selection') {
@@ -1698,7 +1171,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
         <div className="bg-gray-800 rounded-2xl p-6 sm:p-8 border-2 border-orange-500 max-w-md w-full">
           <button
-            onClick={() => onExit ? onExit() : setCurrentScreen('home')}
+            onClick={() => onExit && onExit()}
             className="mb-4 text-gray-400 hover:text-white flex items-center gap-2"
           >
             ← Volver
@@ -1724,130 +1197,12 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
   }
 
   // ============================================
-  // RENDER - PANTALLA HISTORIAL (solo en modo legacy sin onExit)
-  // ============================================
-  if (currentScreen === 'history' && !onExit) {
-    const gamesList = getGamesList().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-
-    return (
-      <div className="min-h-screen bg-gray-900 text-white p-4">
-        <div className="max-w-md mx-auto">
-          <div className="flex items-center gap-4 mb-6">
-            <button
-              onClick={() => setCurrentScreen('home')}
-              className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
-            >
-              ←
-            </button>
-            <h1 className="text-xl font-black text-orange-400">📋 Historial de Partidos</h1>
-          </div>
-
-          {gamesList.length === 0 ? (
-            <div className="text-center text-gray-500 py-8">
-              <div className="text-4xl mb-4">🏀</div>
-              <p>No hay partidos guardados</p>
-              <button
-                onClick={() => setCurrentScreen('team-selection')}
-                className="mt-4 bg-green-700 hover:bg-green-600 px-4 py-2 rounded-lg font-bold"
-              >
-                Crear primer partido
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {gamesList.map(game => {
-                const isInProgress = game.status === 'in_progress';
-                const ourScore = game.isHomeTeam ? game.homeScore : game.awayScore;
-                const theirScore = game.isHomeTeam ? game.awayScore : game.homeScore;
-                const didWin = ourScore > theirScore;
-                const didLose = ourScore < theirScore;
-
-                return (
-                  <div
-                    key={game.id}
-                    className={`bg-gray-800 rounded-xl p-4 border-2 ${isInProgress ? 'border-yellow-500' : 'border-gray-600'} relative`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="text-xs text-gray-400">
-                        📅 {new Date(game.updatedAt).toLocaleDateString('es-ES', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </div>
-                      <div className={`text-xs px-2 py-0.5 rounded font-bold ${isInProgress ? 'bg-yellow-600' : 'bg-green-600'}`}>
-                        {isInProgress ? '⏸️ En progreso' : '✅ Finalizado'}
-                      </div>
-                    </div>
-
-                    <div className="text-lg font-bold mb-2">
-                      <span className={game.isHomeTeam ? (didWin ? 'text-green-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
-                        {game.homeTeam} {game.homeScore}
-                      </span>
-                      <span className="text-gray-500"> - </span>
-                      <span className={!game.isHomeTeam ? (didWin ? 'text-green-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
-                        {game.awayScore} {game.awayTeam}
-                      </span>
-                    </div>
-
-                    <div className="text-xs text-gray-500 mb-3">
-                      Q{game.currentQuarter} {isInProgress ? '- En progreso' : '- Completado'}
-                      {game.isHomeTeam ? ' • Home' : ' • Away'}
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => loadGame(game.id)}
-                        className="flex-1 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 py-2 rounded-lg font-bold text-sm"
-                      >
-                        {isInProgress ? '▶️ Continuar' : '👁️ Ver'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          const data = loadGameData(game.id);
-                          if (data) {
-                            // Cargar temporalmente para generar reporte
-                            loadGame(game.id);
-                            setTimeout(() => generateReport(), 100);
-                          }
-                        }}
-                        className="bg-purple-600 hover:bg-purple-500 active:bg-purple-400 px-3 py-2 rounded-lg font-bold text-sm"
-                        title="Descargar reporte"
-                      >
-                        📥
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm('¿Eliminar este partido?')) {
-                            deleteGame(game.id);
-                            setCurrentScreen('history'); // Forzar re-render
-                          }
-                        }}
-                        className="bg-red-600 hover:bg-red-500 active:bg-red-400 px-3 py-2 rounded-lg font-bold text-sm"
-                        title="Eliminar"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ============================================
   // RENDER - PANTALLA PRINCIPAL DEL PARTIDO
   // ============================================
   return (
     <>
     {/* Modal de salida */}
-    {showExitModal && (
+    {activeModal === 'exit' && (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
         <div className="bg-gray-800 rounded-xl p-6 border-2 border-orange-500 max-w-sm w-full">
           <h3 className="text-xl font-black text-center mb-4 text-orange-400">¿Qué quieres hacer?</h3>
@@ -1867,7 +1222,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
               <div className="text-xs font-normal opacity-75">Se guarda en el historial</div>
             </button>
             <button
-              onClick={() => setShowExitModal(false)}
+              onClick={() => setActiveModal(null)}
               className="w-full bg-gray-600 hover:bg-gray-500 active:bg-gray-400 py-3 rounded-lg font-bold"
             >
               ❌ CANCELAR
@@ -1951,7 +1306,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                           className={`text-xs font-bold text-white ${isOutOfPosition ? 'bg-purple-600 border-purple-400 hover:bg-purple-500' : statusColor} border-2 px-3 py-1.5 rounded cursor-pointer transition-colors active:opacity-80`}
                         >
                           #{s.number} {s.name} (💺{formatTime(s.currentMinutes)} | {s.fouls}F)
-                          {isOutOfPosition && <span className="ml-1 text-yellow-300">⚠️ Joker→Alero</span>}
+                          {isOutOfPosition && <span className="ml-1 text-yellow-300">⚠️ {s.originalPosition}→{s.playingAs}</span>}
                         </button>
                       );
                     })}
@@ -2081,6 +1436,9 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                   const qPartials = partials[q];
                   const firstColor = getPartialColor(qPartials.first.us, qPartials.first.them);
                   const secondColor = getPartialColor(qPartials.second.us, qPartials.second.them);
+                  const quarterUs = qPartials.first.us + qPartials.second.us;
+                  const quarterThem = qPartials.first.them + qPartials.second.them;
+                  const quarterColor = getPartialColor(quarterUs, quarterThem);
                   const isCurrentQ = q === currentQuarter;
                   const isFirstHalfCurrent = isCurrentQ && currentHalf === 'first';
                   const isSecondHalfCurrent = isCurrentQ && currentHalf === 'second';
@@ -2095,6 +1453,9 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                           <span className="text-xs font-bold">{qPartials.second.us}-{qPartials.second.them}</span>
                         </div>
                       </div>
+                      <div className={`${quarterColor} rounded px-1 py-0.5 text-center mt-0.5`}>
+                        <span className="text-xs font-black">{quarterUs}-{quarterThem}</span>
+                      </div>
                     </div>
                   );
                 })}
@@ -2102,59 +1463,69 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
             );
           })()}
 
-          {/* Control buttons */}
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            <button onClick={toggleGameRunning} className={`flex-1 min-w-[60px] px-2 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1 ${gameRunning ? 'bg-orange-600' : 'bg-green-600'}`}>
-              {gameRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              <span className="hidden sm:inline">{gameRunning ? 'PAUSE' : 'PLAY'}</span>
-            </button>
-            <button
-              onMouseDown={handleResetMouseDown}
-              onMouseUp={handleResetMouseUp}
-              onMouseLeave={handleResetMouseLeave}
-              onTouchStart={handleResetMouseDown}
-              onTouchEnd={handleResetMouseUp}
-              className={`px-2 py-2 rounded-lg font-bold text-sm flex items-center justify-center ${actionHistory.length > 0 ? 'bg-red-600' : 'bg-gray-600'}`}
-            >
-              <Undo2 className="w-4 h-4" />
-            </button>
-            <button onClick={() => setShowIntervalsModal(true)} className="px-2 py-2 bg-gray-600 rounded-lg">
-              <Settings className="w-4 h-4" />
-            </button>
-            <button onClick={generateReport} className="px-2 py-2 bg-blue-600 rounded-lg">
-              <Download className="w-4 h-4" />
-            </button>
-            <button onClick={() => setShowExitModal(true)} className="px-2 py-2 bg-orange-600 rounded-lg" title="Salir del partido">
-              <XCircle className="w-4 h-4" />
-            </button>
-            <div className="flex items-center bg-gray-700 rounded-lg px-2 py-1">
-              <Users className="w-4 h-4 text-blue-400" />
-              <span className={`text-sm font-bold ml-1 ${onCourtCount === 5 ? 'text-green-400' : 'text-red-400'}`}>{onCourtCount}/5</span>
+          {/* Aviso de jugadores en pista */}
+          {courtWarning && (
+            <div className="bg-red-600 text-white text-center py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-3">
+              <span>{courtWarning}</span>
+              <button onClick={() => setCourtWarning(null)} className="bg-white text-red-600 px-3 py-0.5 rounded font-bold text-xs">OK</button>
             </div>
-          </div>
+          )}
 
-          {/* Scoring buttons */}
-          <div className="grid grid-cols-4 gap-1.5">
-            <button onClick={() => { setSelectedPoints(3); setShowScoreModal(true); }} className="py-2.5 bg-purple-600 active:bg-purple-500 rounded-lg font-black text-sm">+3</button>
-            <button onClick={() => { setSelectedPoints(2); setShowScoreModal(true); }} className="py-2.5 bg-blue-600 active:bg-blue-500 rounded-lg font-black text-sm">+2</button>
-            <button onClick={() => { setSelectedPoints(1); setShowScoreModal(true); }} className="py-2.5 bg-green-600 active:bg-green-500 rounded-lg font-black text-sm">+1</button>
-            <button onClick={() => setShowFoulModal(true)} className="py-2.5 bg-yellow-600 active:bg-yellow-500 rounded-lg font-black text-sm flex items-center justify-center">
-              <Bell className="w-4 h-4" />
-            </button>
+          {/* Action buttons */}
+          <div className="flex gap-1.5">
+            {/* Play + contador a la izquierda */}
+            <div className="flex flex-col gap-1.5" style={{width: 'calc(33.33% - 3px)'}}>
+              <button onClick={toggleGameRunning} className={`aspect-square md:aspect-auto md:py-4 rounded-lg font-bold text-lg flex flex-col items-center justify-center gap-0.5 ${gameRunning ? 'bg-orange-600 active:bg-orange-500' : 'bg-green-600 active:bg-green-500'}`}>
+                {gameRunning ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
+                <span className="text-xs">{gameRunning ? 'PAUSE' : 'PLAY'}</span>
+              </button>
+              <div className="flex items-center justify-center bg-gray-700 rounded-lg py-1.5">
+                <Users className="w-4 h-4 text-blue-400" />
+                <span className={`text-sm font-bold ml-1 ${onCourtCount === 5 ? 'text-green-400' : 'text-red-400'}`}>{onCourtCount}/5</span>
+              </div>
+            </div>
+            {/* Puntos/falta + secundarios a la derecha */}
+            <div className="flex-1 grid grid-cols-4 grid-rows-[3fr_2fr] md:grid-rows-[2fr_1fr] gap-1.5">
+              <button onClick={() => { setSelectedPoints(3); setActiveModal('score'); }} className="bg-purple-600 active:bg-purple-500 rounded-lg font-black text-lg flex items-center justify-center">+3</button>
+              <button onClick={() => { setSelectedPoints(2); setActiveModal('score'); }} className="bg-blue-600 active:bg-blue-500 rounded-lg font-black text-lg flex items-center justify-center">+2</button>
+              <button onClick={() => { setSelectedPoints(1); setActiveModal('score'); }} className="bg-green-600 active:bg-green-500 rounded-lg font-black text-lg flex items-center justify-center">+1</button>
+              <button onClick={() => setActiveModal('foul')} className="bg-yellow-600 active:bg-yellow-500 rounded-lg font-black text-lg flex items-center justify-center">
+                <Bell className="w-6 h-6" />
+              </button>
+              <button
+                onMouseDown={handleResetMouseDown}
+                onMouseUp={handleResetMouseUp}
+                onMouseLeave={handleResetMouseLeave}
+                onTouchStart={handleResetMouseDown}
+                onTouchEnd={handleResetMouseUp}
+                className={`py-1.5 rounded-lg font-bold text-sm flex items-center justify-center ${actionHistory.length > 0 ? 'bg-red-600' : 'bg-gray-600'}`}
+              >
+                <Undo2 className="w-4 h-4" />
+              </button>
+              <button onClick={() => setActiveModal('intervals')} className="py-1.5 bg-gray-600 rounded-lg flex items-center justify-center">
+                <Settings className="w-4 h-4" />
+              </button>
+              <button onClick={generateReport} className="py-1.5 bg-blue-600 rounded-lg flex items-center justify-center">
+                <Download className="w-4 h-4" />
+              </button>
+              <button onClick={() => setActiveModal('exit')} className="py-1.5 bg-orange-600 rounded-lg flex items-center justify-center" title="Salir del partido">
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
 
         {/* PLAYERS GRID */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
           {/* ON COURT */}
           <div className="bg-blue-900/30 rounded-lg p-2 border border-blue-700">
             <div className="flex items-center gap-2 mb-2">
               <span className="bg-blue-600 px-2 py-0.5 rounded text-xs font-bold">EN PISTA</span>
               <span className="text-xs font-bold">{onCourtCount}/5</span>
             </div>
-            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
               {onCourtPlayers.length === 0 ? (
-                <div className="col-span-3 sm:col-span-5 text-center py-4 text-gray-500 text-sm">Selecciona 5 jugadores</div>
+                <div className="col-span-3 sm:col-span-4 text-center py-4 text-gray-500 text-sm">Selecciona 5 jugadores</div>
               ) : (
                 onCourtPlayers.map(p => (
                   <PlayerCard
@@ -2163,17 +1534,13 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                     isRosterView={false}
                     currentQuarter={currentQuarter}
                     editingPlayer={editingPlayer}
-                    editingStats={editingStats}
                     editForm={editForm}
-                    statsForm={statsForm}
                     onEditFormChange={setEditForm}
-                    onStatsFormChange={setStatsForm}
                     onStartEditing={startEditingPlayer}
-                    onStartEditingStats={startEditingStats}
                     onSaveEdit={savePlayerEdit}
-                    onSaveStats={saveStatsEdit}
                     onCancelEdit={cancelPlayerEdit}
                     onToggleCourt={toggleCourt}
+                    onAdjustFouls={adjustFouls}
                     getCourtTimeStatus={getCourtTimeStatus}
                     getBenchTimeStatus={getBenchTimeStatus}
                   />
@@ -2191,7 +1558,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
             {/* Bases */}
             <div className="mb-2">
               <div className="text-xs font-bold text-blue-400 mb-1">BASES</div>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
                 {bases.map(p => (
                   <PlayerCard
                     key={p.id}
@@ -2199,17 +1566,13 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                     isRosterView={true}
                     currentQuarter={currentQuarter}
                     editingPlayer={editingPlayer}
-                    editingStats={editingStats}
                     editForm={editForm}
-                    statsForm={statsForm}
                     onEditFormChange={setEditForm}
-                    onStatsFormChange={setStatsForm}
                     onStartEditing={startEditingPlayer}
-                    onStartEditingStats={startEditingStats}
                     onSaveEdit={savePlayerEdit}
-                    onSaveStats={saveStatsEdit}
                     onCancelEdit={cancelPlayerEdit}
                     onToggleCourt={toggleCourt}
+                    onAdjustFouls={adjustFouls}
                     getCourtTimeStatus={getCourtTimeStatus}
                     getBenchTimeStatus={getBenchTimeStatus}
                   />
@@ -2220,7 +1583,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
             {/* Aleros */}
             <div className="mb-2">
               <div className="text-xs font-bold text-green-400 mb-1">ALEROS</div>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
                 {aleros.map(p => (
                   <PlayerCard
                     key={p.id}
@@ -2228,17 +1591,13 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                     isRosterView={true}
                     currentQuarter={currentQuarter}
                     editingPlayer={editingPlayer}
-                    editingStats={editingStats}
                     editForm={editForm}
-                    statsForm={statsForm}
                     onEditFormChange={setEditForm}
-                    onStatsFormChange={setStatsForm}
                     onStartEditing={startEditingPlayer}
-                    onStartEditingStats={startEditingStats}
                     onSaveEdit={savePlayerEdit}
-                    onSaveStats={saveStatsEdit}
                     onCancelEdit={cancelPlayerEdit}
                     onToggleCourt={toggleCourt}
+                    onAdjustFouls={adjustFouls}
                     getCourtTimeStatus={getCourtTimeStatus}
                     getBenchTimeStatus={getBenchTimeStatus}
                   />
@@ -2249,7 +1608,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
             {/* Jokers */}
             <div className="mb-2">
               <div className="text-xs font-bold text-purple-400 mb-1">JOKER</div>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
                 {jokers.map(p => (
                   <PlayerCard
                     key={p.id}
@@ -2257,17 +1616,13 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                     isRosterView={true}
                     currentQuarter={currentQuarter}
                     editingPlayer={editingPlayer}
-                    editingStats={editingStats}
                     editForm={editForm}
-                    statsForm={statsForm}
                     onEditFormChange={setEditForm}
-                    onStatsFormChange={setStatsForm}
                     onStartEditing={startEditingPlayer}
-                    onStartEditingStats={startEditingStats}
                     onSaveEdit={savePlayerEdit}
-                    onSaveStats={saveStatsEdit}
                     onCancelEdit={cancelPlayerEdit}
                     onToggleCourt={toggleCourt}
+                    onAdjustFouls={adjustFouls}
                     getCourtTimeStatus={getCourtTimeStatus}
                     getBenchTimeStatus={getBenchTimeStatus}
                   />
@@ -2279,7 +1634,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
             {unselected.length > 0 && (
               <div>
                 <div className="text-xs font-bold text-gray-400 mb-1">NO CONV.</div>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
                   {unselected.map(p => (
                     <PlayerCard
                       key={p.id}
@@ -2287,17 +1642,13 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                       isRosterView={true}
                       currentQuarter={currentQuarter}
                       editingPlayer={editingPlayer}
-                      editingStats={editingStats}
                       editForm={editForm}
-                      statsForm={statsForm}
                       onEditFormChange={setEditForm}
-                      onStatsFormChange={setStatsForm}
                       onStartEditing={startEditingPlayer}
-                      onStartEditingStats={startEditingStats}
                       onSaveEdit={savePlayerEdit}
-                      onSaveStats={saveStatsEdit}
                       onCancelEdit={cancelPlayerEdit}
                       onToggleCourt={toggleCourt}
+                      onAdjustFouls={adjustFouls}
                       getCourtTimeStatus={getCourtTimeStatus}
                       getBenchTimeStatus={getBenchTimeStatus}
                     />
@@ -2309,7 +1660,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
         </div>
 
         {/* MODALS */}
-        {showFouledOutModal && fouledOutPlayer && (
+        {activeModal === 'fouledOut' && fouledOutPlayer && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
             <div className="bg-gray-800 rounded-xl p-4 border-2 border-red-500 max-w-sm w-full">
               <div className="text-center mb-3">
@@ -2319,18 +1670,21 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
               </div>
               <div className="grid grid-cols-2 gap-2 mb-3">
                 {fouledOutReplacements.map(s => (
-                  <button key={s.id} onClick={() => subInPlayer(s.id)} className="bg-green-600 active:bg-green-500 rounded-lg p-3 font-bold text-left">
+                  <button key={s.id} onClick={() => subInPlayer(s.id)} className={`${s.isPlayingOutOfPosition ? 'bg-purple-600 active:bg-purple-500' : 'bg-green-600 active:bg-green-500'} rounded-lg p-3 font-bold text-left`}>
                     <div>#{s.number} {s.name}</div>
-                    <div className="text-xs opacity-80">{formatTime(s.currentMinutes)}</div>
+                    <div className="text-xs opacity-80">
+                      {formatTime(s.currentMinutes)}
+                      {s.isPlayingOutOfPosition && <span className="ml-1 text-yellow-300">⚠️ {s.originalPosition}→{s.playingAs}</span>}
+                    </div>
                   </button>
                 ))}
               </div>
-              <button onClick={() => { setShowFouledOutModal(false); setFouledOutPlayer(null); }} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CERRAR</button>
+              <button onClick={() => { setActiveModal(null); setFouledOutPlayer(null); }} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CERRAR</button>
             </div>
           </div>
         )}
 
-        {showFoulModal && (
+        {activeModal === 'foul' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
             <div className="bg-gray-800 rounded-xl p-4 border-2 border-yellow-500 max-w-sm w-full">
               <h3 className="text-lg font-black mb-3 text-yellow-400 text-center">¿Quién hizo falta?</h3>
@@ -2344,12 +1698,12 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                   </button>
                 ))}
               </div>
-              <button onClick={() => setShowFoulModal(false)} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CANCELAR</button>
+              <button onClick={() => setActiveModal(null)} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CANCELAR</button>
             </div>
           </div>
         )}
 
-        {showScoreModal && (
+        {activeModal === 'score' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
             <div className="bg-gray-800 rounded-xl p-4 border-2 border-orange-500 max-w-sm w-full">
               <h3 className="text-lg font-black mb-3 text-orange-400 text-center">¿Quién anotó {selectedPoints}?</h3>
@@ -2366,25 +1720,25 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
               <button onClick={addRivalPoints} className="w-full py-2 bg-red-700 active:bg-red-600 rounded-lg font-bold mb-2">
                 +{selectedPoints} {rivalTeamName}
               </button>
-              <button onClick={() => { setShowScoreModal(false); setSelectedPoints(null); }} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CANCELAR</button>
+              <button onClick={() => { setActiveModal(null); setSelectedPoints(null); }} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CANCELAR</button>
             </div>
           </div>
         )}
 
-        {showResetConfirm && (
+        {activeModal === 'reset' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
             <div className="bg-gray-800 rounded-xl p-4 border-2 border-red-500 max-w-xs w-full">
               <h3 className="text-lg font-black mb-2 text-red-400 text-center">⚠️ RESET</h3>
               <p className="text-center text-gray-300 mb-4">¿Resetear todo?</p>
               <div className="flex gap-2">
                 <button onClick={confirmReset} className="flex-1 py-2 bg-red-600 rounded-lg font-bold">SÍ</button>
-                <button onClick={() => setShowResetConfirm(false)} className="flex-1 py-2 bg-gray-600 rounded-lg font-bold">NO</button>
+                <button onClick={() => setActiveModal(null)} className="flex-1 py-2 bg-gray-600 rounded-lg font-bold">NO</button>
               </div>
             </div>
           </div>
         )}
 
-        {showIntervalsModal && (
+        {activeModal === 'intervals' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
             <div className="bg-gray-800 rounded-xl p-4 border-2 border-gray-500 max-w-xs w-full">
               <h3 className="text-lg font-black mb-3 text-center">Configurar Stints</h3>
@@ -2428,7 +1782,7 @@ ${playerStintStats.sort((a,b)=>b.totalTime-a.totalTime).map(p=>`<tr><td><strong>
                   </div>
                 </div>
               </div>
-              <button onClick={() => setShowIntervalsModal(false)} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CERRAR</button>
+              <button onClick={() => setActiveModal(null)} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CERRAR</button>
             </div>
           </div>
         )}

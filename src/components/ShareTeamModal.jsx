@@ -40,7 +40,7 @@ export default function ShareTeamModal({ team, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-xl p-5 border-2 border-orange-500 max-w-sm w-full">
+      <div className="bg-gray-800 rounded-xl p-5 border-2 border-orange-500 max-w-sm md:max-w-md w-full">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-black text-orange-400">Compartir equipo</h3>
           <button onClick={onClose} className="p-1 bg-gray-700 rounded-lg hover:bg-gray-600">

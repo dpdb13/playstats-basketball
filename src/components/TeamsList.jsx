@@ -85,7 +85,7 @@ export default function TeamsList() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
-      <div className="max-w-md mx-auto">
+      <div className="max-w-md md:max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
@@ -136,7 +136,7 @@ export default function TeamsList() {
             <p className="text-gray-500 text-sm">Crea tu primer equipo para empezar</p>
           </div>
         ) : (
-          <div className="space-y-3 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
             {teams.map(team => (
               <button
                 key={team.id}
@@ -201,7 +201,7 @@ export default function TeamsList() {
       {/* Modal de invitacion */}
       {inviteModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-xl p-5 border-2 border-orange-500 max-w-sm w-full">
+          <div className="bg-gray-800 rounded-xl p-5 border-2 border-orange-500 max-w-sm md:max-w-md w-full">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-black text-orange-400">Invitacion a equipo</h3>
               <button onClick={() => setInviteModal(null)} className="p-1 bg-gray-700 rounded-lg hover:bg-gray-600">

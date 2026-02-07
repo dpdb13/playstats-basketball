@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import {
@@ -33,6 +33,7 @@ export function TeamProvider({ children }) {
   const [teamGames, setTeamGames] = useState([]);
   const [loading, setLoading] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
+  const realtimeChannel = useRef(null);
 
   // Detectar online/offline
   useEffect(() => {
@@ -131,6 +132,12 @@ export function TeamProvider({ children }) {
     setCurrentTeam(team);
     setLoading(true);
 
+    // Limpiar suscripcion Realtime anterior
+    if (realtimeChannel.current) {
+      supabase.removeChannel(realtimeChannel.current);
+      realtimeChannel.current = null;
+    }
+
     try {
       if (isOnline()) {
         // Cargar jugadores
@@ -154,6 +161,47 @@ export function TeamProvider({ children }) {
         if (gamesError) throw gamesError;
         setTeamGames(games || []);
         setCachedGames(team.id, games || []);
+
+        // Suscripcion Realtime para cambios en partidos de este equipo
+        const channel = supabase
+          .channel(`games-team-${team.id}`)
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'games', filter: `team_id=eq.${team.id}` },
+            (payload) => {
+              setTeamGames(prev => {
+                if (prev.some(g => g.id === payload.new.id)) return prev;
+                const updated = [payload.new, ...prev];
+                setCachedGames(team.id, updated);
+                return updated;
+              });
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'games', filter: `team_id=eq.${team.id}` },
+            (payload) => {
+              setTeamGames(prev => {
+                const updated = prev.map(g => g.id === payload.new.id ? payload.new : g);
+                setCachedGames(team.id, updated);
+                return updated;
+              });
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: 'DELETE', schema: 'public', table: 'games', filter: `team_id=eq.${team.id}` },
+            (payload) => {
+              setTeamGames(prev => {
+                const updated = prev.filter(g => g.id !== payload.old.id);
+                setCachedGames(team.id, updated);
+                return updated;
+              });
+            }
+          )
+          .subscribe();
+
+        realtimeChannel.current = channel;
       } else {
         setTeamPlayers(getCachedPlayers(team.id));
         setTeamGames(getCachedGames(team.id));
@@ -169,6 +217,11 @@ export function TeamProvider({ children }) {
 
   // Volver a lista de equipos
   const deselectTeam = useCallback(() => {
+    // Limpiar suscripcion Realtime
+    if (realtimeChannel.current) {
+      supabase.removeChannel(realtimeChannel.current);
+      realtimeChannel.current = null;
+    }
     setCurrentTeam(null);
     setTeamPlayers([]);
     setTeamGames([]);
