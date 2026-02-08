@@ -426,22 +426,6 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     return () => clearInterval(interval);
   }, [gameRunning, currentQuarter]);
 
-  // Snapshot quintet when quarter auto-advances
-  useEffect(() => {
-    if (quarterAdvancedRef.current) {
-      quarterAdvancedRef.current = false;
-      const { ourScore, rivalScore } = getCurrentScores();
-      if (currentQuintet) {
-        endCurrentQuintet(ourScore, rivalScore);
-        // Restart quintet with same players for the new quarter
-        const onCourt = players.filter(p => p.onCourt);
-        if (onCourt.length === 5) {
-          startNewQuintet(onCourt.map(p => p.id), ourScore, rivalScore);
-        }
-      }
-    }
-  }, [currentQuarter, currentQuintet, getCurrentScores, endCurrentQuintet, startNewQuintet, players]);
-
   // ============================================
   // EFECTOS PARA PARCIALES
   // ============================================
@@ -693,6 +677,22 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       return null;
     });
   }, []);
+
+  // Snapshot quintet when quarter auto-advances
+  useEffect(() => {
+    if (quarterAdvancedRef.current) {
+      quarterAdvancedRef.current = false;
+      const { ourScore, rivalScore } = getCurrentScores();
+      if (currentQuintet) {
+        endCurrentQuintet(ourScore, rivalScore);
+        // Restart quintet with same players for the new quarter
+        const onCourt = players.filter(p => p.onCourt);
+        if (onCourt.length === 5) {
+          startNewQuintet(onCourt.map(p => p.id), ourScore, rivalScore);
+        }
+      }
+    }
+  }, [currentQuarter, currentQuintet, getCurrentScores, endCurrentQuintet, startNewQuintet, players]);
 
   const updateGameFlow = useCallback((newOurScore, newRivalScore) => {
     const { ourScore, rivalScore } = getCurrentScores();
