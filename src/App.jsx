@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TeamProvider, useTeam } from './context/TeamContext';
+import { LanguageProvider } from './context/LanguageContext';
 import Auth from './components/Auth';
 import TeamsList from './components/TeamsList';
 import TeamDetail from './components/TeamDetail';
@@ -64,7 +65,7 @@ function AppContent() {
   // Pantalla de carga
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
           <p>Cargando...</p>
@@ -110,9 +111,11 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <TeamProvider>
-        <AppContent />
-      </TeamProvider>
+      <LanguageProvider>
+        <TeamProvider>
+          <AppContent />
+        </TeamProvider>
+      </LanguageProvider>
     </AuthProvider>
   );
 }

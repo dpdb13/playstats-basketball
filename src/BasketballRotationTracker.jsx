@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Undo2, RefreshCw, Bell } from 'lucide-react';
+import { Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Undo2, RefreshCw, Bell, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
 import PlayStatsIcon from './components/PlayStatsIcon';
 import { addToQueue } from './lib/syncManager';
 import { formatTime, formatGameTime, getFoulStatus, getFoulBgClass, getQuintetKey, createInitialPlayerState, INITIAL_PARTIAL_SCORES } from './lib/gameUtils';
 import { generateReport as generateReportHTML } from './lib/generateReport';
 import PlayerCard from './components/PlayerCard';
+import { useTranslation } from './context/LanguageContext';
+import useSwipeGesture from './hooks/useSwipeGesture';
 
 // ============================================
 // CONSTANTES
@@ -81,6 +83,16 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
 
   // Refs
   const longPressTimer = useRef(null);
+
+  // i18n + UI states
+  const { t, language, toggleLanguage } = useTranslation();
+  const [compactView, setCompactView] = useState(true);
+  const [showFouls, setShowFouls] = useState(false);
+
+  // Swipe gesture (swipe left = open exit modal)
+  const { handleTouchStart, handleTouchEnd } = useSwipeGesture({
+    onSwipeLeft: () => setActiveModal('exit')
+  });
 
   // ============================================
   // AUTOGUARDADO Y RECUPERACIÓN
@@ -510,18 +522,18 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
           );
           const allSuggestions = [...sortedSamePosition, ...sortedCrossPosition];
 
-          let reason = '', priority = 0, isFoulIssue = false;
+          let reason = null, priority = 0, isFoulIssue = false;
 
           if (foulStatus === 'danger') {
-            reason = `FALTAS (${player.fouls}/5 en Q${currentQuarter})`;
+            reason = { type: 'foulsDanger', fouls: player.fouls, quarter: currentQuarter };
             priority = 4;
             isFoulIssue = true;
           } else if (foulStatus === 'warning') {
-            reason = `Faltas (${player.fouls}/5 en Q${currentQuarter})`;
+            reason = { type: 'foulsWarning', fouls: player.fouls, quarter: currentQuarter };
             priority = 3;
             isFoulIssue = true;
           } else if (needsSubForStint) {
-            reason = `DESCANSO (${formatTime(player.currentMinutes)} seguidos)`;
+            reason = { type: 'rest', time: formatTime(player.currentMinutes) };
             priority = 1;
           }
 
@@ -739,7 +751,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const toggleGameRunning = useCallback(() => {
     const currentOnCourtCount = players.filter(p => p.onCourt).length;
     if (!gameRunning && currentOnCourtCount !== 5) {
-      setCourtWarning(`Faltan ${5 - currentOnCourtCount} jugadores en pista`);
+      setCourtWarning(t.playersNeeded(5 - currentOnCourtCount));
       return;
     }
 
@@ -755,7 +767,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       endCurrentQuintet(ourScore, rivalScore);
     }
     setGameRunning(!gameRunning);
-  }, [players, gameRunning, getCurrentScores, currentQuintet, startNewQuintet, endCurrentQuintet]);
+  }, [players, gameRunning, getCurrentScores, currentQuintet, startNewQuintet, endCurrentQuintet, t]);
 
   const adjustFouls = useCallback((playerId, delta) => {
     const player = players.find(p => p.id === playerId);
@@ -766,12 +778,24 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
 
     const { ourScore, rivalScore } = getCurrentScores();
 
+    // Save full player state so undo of 5th foul can restore everything
+    const previousPlayerState = newFouls >= 5 && player.onCourt ? {
+      currentMinutes: player.currentMinutes,
+      lastToggle: player.lastToggle,
+      totalCourtTime: player.totalCourtTime,
+      totalBenchTime: player.totalBenchTime,
+      stints: [...player.stints],
+      stintPlusMinus: [...player.stintPlusMinus],
+      currentStintStart: player.currentStintStart
+    } : null;
+
     setActionHistory(prev => [...prev, {
       type: 'foul',
       playerId,
       delta,
       previousFouls: player.fouls,
       wasOnCourt: player.onCourt,
+      previousPlayerState,
       scoreAtAction: { ourScore, rivalScore }
     }]);
     if (delta > 0) {
@@ -861,11 +885,18 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         }));
       }
     } else if (lastAction.type === 'foul') {
-      setPlayers(prev => prev.map(p =>
-        p.id === lastAction.playerId
-          ? { ...p, fouls: lastAction.previousFouls, onCourt: lastAction.wasOnCourt !== undefined ? lastAction.wasOnCourt : p.onCourt }
-          : p
-      ));
+      setPlayers(prev => prev.map(p => {
+        if (p.id !== lastAction.playerId) return p;
+        const restored = { ...p, fouls: lastAction.previousFouls };
+        // If undoing a fouled-out (5th foul), restore full player state
+        if (lastAction.previousPlayerState && lastAction.wasOnCourt) {
+          return { ...restored, ...lastAction.previousPlayerState, onCourt: true };
+        }
+        if (lastAction.wasOnCourt !== undefined) {
+          restored.onCourt = lastAction.wasOnCourt;
+        }
+        return restored;
+      }));
       if (lastAction.previousFouls === 4 && lastAction.wasOnCourt) {
         setRotationHistory(prev => prev.slice(0, -1));
         setFouledOutPlayer(null);
@@ -911,7 +942,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     }, 800);
   }, []);
 
-  const handleResetMouseUp = useCallback(() => {
+  const handleResetMouseUp = useCallback((e) => {
+    // Prevent double-fire on touch devices (touchEnd + mouseUp)
+    if (e?.type === 'touchend') e.preventDefault();
     clearTimeout(longPressTimer.current);
     if (!isLongPress) undoLastAction();
   }, [isLongPress, undoLastAction]);
@@ -1149,15 +1182,26 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     generateReportHTML({ ourScore, rivalScore, ourTeamName, rivalTeamName, players, quintetHistory, substitutionsByQuarter });
   }, [getCurrentScores, currentQuintet, gameRunning, endCurrentQuintet, players, quintetHistory, substitutionsByQuarter, ourTeamName, rivalTeamName]);
 
+  // Helper para renderizar razón de recomendación
+  const renderReason = (reason) => {
+    if (!reason) return '';
+    switch (reason.type) {
+      case 'foulsDanger': return t.foulsDanger(reason.fouls, reason.quarter);
+      case 'foulsWarning': return t.foulsWarning(reason.fouls, reason.quarter);
+      case 'rest': return t.restReason(reason.time);
+      default: return '';
+    }
+  };
+
   // ============================================
   // RENDER - PANTALLA DE CARGA
   // ============================================
   if (!isInitialized) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
-          <p>Cargando...</p>
+          <p>{t.loading}</p>
         </div>
       </div>
     );
@@ -1168,27 +1212,35 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   // ============================================
   if (currentScreen === 'team-selection') {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
-        <div className="bg-gray-800 rounded-2xl p-6 sm:p-8 border-2 border-orange-500 max-w-md w-full">
-          <button
-            onClick={() => onExit && onExit()}
-            className="mb-4 text-gray-400 hover:text-white flex items-center gap-2"
-          >
-            ← Volver
-          </button>
+      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-4">
+        <div className="bg-slate-800 rounded-2xl p-6 sm:p-8 border-2 border-orange-500 max-w-md w-full">
+          <div className="flex items-center justify-between mb-4">
+            <button
+              onClick={() => onExit && onExit()}
+              className="text-slate-400 hover:text-white flex items-center gap-2 min-h-[44px]"
+            >
+              {t.back}
+            </button>
+            <button
+              onClick={toggleLanguage}
+              className="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-sm font-bold"
+            >
+              {language === 'en' ? 'ES' : 'EN'}
+            </button>
+          </div>
           <div className="flex items-center justify-center gap-2 mb-6">
             <PlayStatsIcon className="w-8 h-8 text-orange-500" />
-            <h1 className="text-xl sm:text-2xl font-black text-orange-400">Nuevo Partido</h1>
+            <h1 className="text-xl sm:text-2xl font-black text-orange-400">{t.newGame}</h1>
           </div>
-          <h2 className="text-lg font-bold text-center mb-6 text-gray-300">Your team plays as...</h2>
+          <h2 className="text-lg font-bold text-center mb-6 text-slate-300">{t.teamPlaysAs}</h2>
           <div className="grid grid-cols-2 gap-4">
-            <button onClick={() => createNewGame(true)} className="bg-blue-700 hover:bg-blue-600 active:bg-blue-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-blue-400">
+            <button onClick={() => createNewGame(true)} className="bg-blue-700 hover:bg-blue-600 active:bg-blue-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-blue-400 min-h-[100px]">
               <div className="text-3xl sm:text-4xl mb-2">🏠</div>
-              <div className="text-lg sm:text-xl">HOME</div>
+              <div className="text-lg sm:text-xl">{t.home}</div>
             </button>
-            <button onClick={() => createNewGame(false)} className="bg-red-700 hover:bg-red-600 active:bg-red-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-red-400">
+            <button onClick={() => createNewGame(false)} className="bg-red-700 hover:bg-red-600 active:bg-red-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-red-400 min-h-[100px]">
               <div className="text-3xl sm:text-4xl mb-2">✈️</div>
-              <div className="text-lg sm:text-xl">AWAY</div>
+              <div className="text-lg sm:text-xl">{t.away}</div>
             </button>
           </div>
         </div>
@@ -1199,239 +1251,317 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   // ============================================
   // RENDER - PANTALLA PRINCIPAL DEL PARTIDO
   // ============================================
+
+  // Helper para renderizar PlayerCard con todas las props comunes
+  const renderPlayerCard = (p, isRosterView) => (
+    <PlayerCard
+      key={p.id}
+      player={p}
+      isRosterView={isRosterView}
+      compact={compactView}
+      currentQuarter={currentQuarter}
+      editingPlayer={editingPlayer}
+      editForm={editForm}
+      onEditFormChange={setEditForm}
+      onStartEditing={startEditingPlayer}
+      onSaveEdit={savePlayerEdit}
+      onCancelEdit={cancelPlayerEdit}
+      onToggleCourt={toggleCourt}
+      onAdjustFouls={adjustFouls}
+      getCourtTimeStatus={getCourtTimeStatus}
+      getBenchTimeStatus={getBenchTimeStatus}
+    />
+  );
+
+  const hasFoulWarnings = warningPlayers.length > 0 || dangerPlayers.length > 0;
+
   return (
     <>
-    {/* Modal de salida */}
+    {/* ===== MODALS ===== */}
+
+    {/* Exit modal */}
     {activeModal === 'exit' && (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-        <div className="bg-gray-800 rounded-xl p-6 border-2 border-orange-500 max-w-sm w-full">
-          <h3 className="text-xl font-black text-center mb-4 text-orange-400">¿Qué quieres hacer?</h3>
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-6 border-2 border-orange-500 max-w-sm w-full modal-content">
+          <h3 className="text-xl font-black text-center mb-4 text-orange-400">{t.whatToDo}</h3>
           <div className="space-y-3">
-            <button
-              onClick={saveAndExit}
-              className="w-full bg-yellow-600 hover:bg-yellow-500 active:bg-yellow-400 py-3 rounded-lg font-bold"
-            >
-              💾 GUARDAR Y SALIR
-              <div className="text-xs font-normal opacity-75">Podrás continuar después</div>
+            <button onClick={saveAndExit} className="w-full bg-amber-600 hover:bg-amber-500 active:bg-amber-400 min-h-[56px] rounded-lg font-bold">
+              💾 {t.saveAndExit}
+              <div className="text-xs font-normal opacity-75">{t.canContinueLater}</div>
             </button>
-            <button
-              onClick={finishGame}
-              className="w-full bg-green-600 hover:bg-green-500 active:bg-green-400 py-3 rounded-lg font-bold"
-            >
-              ✅ FINALIZAR PARTIDO
-              <div className="text-xs font-normal opacity-75">Se guarda en el historial</div>
+            <button onClick={finishGame} className="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-400 min-h-[56px] rounded-lg font-bold">
+              ✅ {t.finishGame}
+              <div className="text-xs font-normal opacity-75">{t.savedToHistory}</div>
             </button>
-            <button
-              onClick={() => setActiveModal(null)}
-              className="w-full bg-gray-600 hover:bg-gray-500 active:bg-gray-400 py-3 rounded-lg font-bold"
-            >
-              ❌ CANCELAR
+            <button onClick={() => setActiveModal(null)} className="w-full bg-slate-600 hover:bg-slate-500 active:bg-slate-400 min-h-[44px] rounded-lg font-bold">
+              ❌ {t.cancel}
             </button>
           </div>
         </div>
       </div>
     )}
-    <div className="min-h-screen bg-gray-900 text-white p-2 sm:p-4">
-      <div className="max-w-7xl mx-auto space-y-2 sm:space-y-3">
 
-        {/* FOUL WARNINGS */}
-        <div className="bg-gray-800 rounded-lg p-2 sm:p-3 border border-gray-700">
-          <h3 className="font-black text-sm mb-2 text-yellow-400 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4" />FALTAS - Q{currentQuarter}
-          </h3>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-2">
-              <div className="flex items-center gap-1 mb-1">
-                <AlertTriangle className="w-3 h-3 text-yellow-400" />
-                <span className="font-bold text-yellow-400 text-xs">WARNING</span>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {warningPlayers.map(p => (
-                  <span key={p.id} className="text-xs font-semibold text-white bg-yellow-800/60 px-2 py-0.5 rounded">
-                    #{p.number} {p.name}
-                  </span>
-                ))}
-                {warningPlayers.length === 0 && <span className="text-xs text-gray-500">-</span>}
-              </div>
-            </div>
-            <div className="bg-red-900/30 border border-red-600 rounded-lg p-2">
-              <div className="flex items-center gap-1 mb-1">
-                <XCircle className="w-3 h-3 text-red-400" />
-                <span className="font-bold text-red-400 text-xs">DANGER</span>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {dangerPlayers.map(p => (
-                  <span key={p.id} className="text-xs font-semibold text-white bg-red-800/60 px-2 py-0.5 rounded">
-                    #{p.number} {p.name}
-                  </span>
-                ))}
-                {dangerPlayers.length === 0 && <span className="text-xs text-gray-500">-</span>}
-              </div>
-            </div>
+    {/* Fouled out modal */}
+    {activeModal === 'fouledOut' && fouledOutPlayer && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-red-500 max-w-sm w-full modal-content">
+          <div className="text-center mb-3">
+            <XCircle className="w-12 h-12 text-red-500 mx-auto mb-2" />
+            <h3 className="text-xl font-black text-red-400">{t.fouledOut}</h3>
+            <p className="font-bold">#{fouledOutPlayer.number} {fouledOutPlayer.name}</p>
           </div>
-        </div>
-
-        {/* SUB RECOMMENDATIONS */}
-        <div className="bg-gray-800 rounded-lg p-2 sm:p-3 border border-cyan-700">
-          <h3 className="font-black text-sm mb-2 text-cyan-400 flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" />RECOMENDACIONES DE CAMBIO
-          </h3>
-          {subRecommendations.length > 0 ? (
-            <div className="space-y-3">
-              {subRecommendations.map((rec, idx) => (
-                <div key={idx} className={`${rec.isFoulIssue ? 'bg-orange-900/30 border-orange-600' : 'bg-cyan-900/30 border-cyan-600'} border rounded-xl p-3`}>
-                  <div className="flex flex-wrap items-center gap-2 mb-3">
-                    <span className="text-sm font-black text-white bg-gray-700 px-3 py-1 rounded">
-                      #{rec.out.number} {rec.out.name}
-                    </span>
-                    <span className={`text-xs font-bold px-2 py-1 rounded ${rec.isFoulIssue ? 'bg-orange-600 text-white' : 'bg-cyan-600 text-white'}`}>
-                      {rec.reason}
-                    </span>
-                    <span className="text-red-400 font-black text-sm">→ SACAR</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-green-400 font-black text-xs">METER:</span>
-                    {rec.suggestions.map(s => {
-                      const benchStatus = getBenchTimeStatus(s);
-                      const statusColor = benchStatus === 'green'
-                        ? 'bg-green-600 border-green-400 hover:bg-green-500'
-                        : benchStatus === 'yellow'
-                        ? 'bg-yellow-600 border-yellow-400 hover:bg-yellow-500'
-                        : 'bg-red-600 border-red-400 hover:bg-red-500';
-                      const isOutOfPosition = s.isPlayingOutOfPosition;
-                      return (
-                        <button
-                          key={s.id}
-                          onClick={() => executeSub(rec.out.id, s.id)}
-                          className={`text-xs font-bold text-white ${isOutOfPosition ? 'bg-purple-600 border-purple-400 hover:bg-purple-500' : statusColor} border-2 px-3 py-1.5 rounded cursor-pointer transition-colors active:opacity-80`}
-                        >
-                          #{s.number} {s.name} (💺{formatTime(s.currentMinutes)} | {s.fouls}F)
-                          {isOutOfPosition && <span className="ml-1 text-yellow-300">⚠️ {s.originalPosition}→{s.playingAs}</span>}
-                        </button>
-                      );
-                    })}
-                    {rec.suggestions.length === 0 && (
-                      <span className="text-xs text-gray-400">No hay jugadores disponibles en esta posición sin problemas de faltas</span>
-                    )}
-                  </div>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            {fouledOutReplacements.map(s => (
+              <button key={s.id} onClick={() => subInPlayer(s.id)} className={`${s.isPlayingOutOfPosition ? 'bg-purple-600 active:bg-purple-500' : 'bg-emerald-600 active:bg-emerald-500'} rounded-lg p-3 min-h-[48px] font-bold text-left`}>
+                <div>#{s.number} {s.name}</div>
+                <div className="text-xs opacity-80">
+                  {formatTime(s.currentMinutes)}
+                  {s.isPlayingOutOfPosition && <span className="ml-1 text-yellow-300">⚠️ {s.originalPosition}→{s.playingAs}</span>}
                 </div>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => { setActiveModal(null); setFouledOutPlayer(null); }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.close}</button>
+        </div>
+      </div>
+    )}
+
+    {/* Foul modal */}
+    {activeModal === 'foul' && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-amber-500 max-w-sm w-full modal-content">
+          <h3 className="text-lg font-black mb-3 text-amber-400 text-center">{t.whoFouled}</h3>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            {onCourtPlayers.map(player => (
+              <button key={player.id} onClick={() => addFoulToPlayer(player.id)} className="bg-amber-700 active:bg-amber-600 rounded-lg min-h-[48px] p-3 font-bold text-left">
+                <div className="flex justify-between items-center">
+                  <span>#{player.number} {player.name}</span>
+                  <span className={`${getFoulBgClass(player.fouls, currentQuarter)} px-2 py-0.5 rounded text-sm`}>{player.fouls}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setActiveModal(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
+        </div>
+      </div>
+    )}
+
+    {/* Score modal */}
+    {activeModal === 'score' && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-orange-500 max-w-sm w-full modal-content">
+          <h3 className="text-lg font-black mb-3 text-orange-400 text-center">{t.whoScored(selectedPoints)}</h3>
+          <div className="mb-3">
+            <div className="text-xs font-bold text-blue-400 mb-1">{ourTeamName}</div>
+            <div className="grid grid-cols-2 gap-2">
+              {onCourtPlayers.map(player => (
+                <button key={player.id} onClick={() => addPoints(player.id)} className="bg-blue-700 active:bg-blue-600 rounded-lg min-h-[48px] p-2 font-bold text-sm">
+                  #{player.number} {player.name}
+                </button>
               ))}
             </div>
-          ) : (
-            <div className="text-center py-4 text-gray-500 text-sm">✓ No hay recomendaciones de cambio en este momento</div>
-          )}
+          </div>
+          <button onClick={addRivalPoints} className="w-full min-h-[48px] bg-red-700 active:bg-red-600 rounded-lg font-bold mb-2">
+            +{selectedPoints} {rivalTeamName}
+          </button>
+          <button onClick={() => { setActiveModal(null); setSelectedPoints(null); }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
         </div>
+      </div>
+    )}
 
-        {/* SCOREBOARD & CONTROLS */}
-        <div className="bg-gray-800 rounded-lg p-2 sm:p-3 border border-gray-700">
-          {/* Score */}
-          <div className="grid grid-cols-3 gap-2 mb-2">
-            <div className={`${isHomeTeam ? 'bg-blue-800 border-blue-400' : 'bg-blue-900/50 border-blue-600'} border-2 rounded-lg p-2 text-center`}>
-              {editingTeam === 'home' ? (
-                <input type="text" defaultValue={homeTeam} onBlur={(e) => { setHomeTeam(e.target.value || 'Home'); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeTeam(e.target.value || 'Home'); setEditingTeam(null); }}} className="bg-gray-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
-              ) : (
-                <div className="text-xs sm:text-sm text-blue-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('home')}>{homeTeam}</div>
-              )}
-              {editingScore === 'home' ? (
-                <input type="number" min="0" defaultValue={homeScore} onBlur={(e) => { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-gray-900 px-2 py-2 rounded text-center font-black text-white w-full text-2xl" autoFocus />
-              ) : (
-                <div className="text-2xl sm:text-3xl font-black cursor-pointer" onClick={() => setEditingScore('home')}>{homeScore}</div>
-              )}
-            </div>
-            <div className="flex flex-col items-center justify-center">
-              <div onClick={() => setShowQuarterSelector(!showQuarterSelector)} className="text-sm font-bold text-orange-400 cursor-pointer">Q{currentQuarter}</div>
-              {editingGameTime ? (
-                <div className="flex flex-col items-center gap-2">
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min="0"
-                      max="10"
-                      value={editGameTimeForm.minutes}
-                      onChange={(e) => setEditGameTimeForm({...editGameTimeForm, minutes: parseInt(e.target.value) || 0})}
-                      className="w-12 sm:w-14 bg-gray-900 px-2 py-2 rounded text-center font-black text-white text-lg"
-                      autoFocus
-                    />
-                    <span className="font-black text-xl">:</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="59"
-                      value={editGameTimeForm.seconds}
-                      onChange={(e) => setEditGameTimeForm({...editGameTimeForm, seconds: Math.min(59, parseInt(e.target.value) || 0)})}
-                      className="w-12 sm:w-14 bg-gray-900 px-2 py-2 rounded text-center font-black text-white text-lg"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        const newTime = (editGameTimeForm.minutes * 60) + editGameTimeForm.seconds;
-                        setGameTime(Math.max(0, Math.min(600, newTime)));
-                        setEditingGameTime(false);
-                      }}
-                      className="bg-green-600 px-4 py-2 rounded text-sm font-bold active:bg-green-500"
-                    >
-                      ✓
-                    </button>
-                    <button
-                      onClick={() => setEditingGameTime(false)}
-                      className="bg-red-600 px-4 py-2 rounded text-sm font-bold active:bg-red-500"
-                    >
-                      ✗
-                    </button>
+    {/* Reset modal */}
+    {activeModal === 'reset' && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-red-500 max-w-xs w-full modal-content">
+          <h3 className="text-lg font-black mb-2 text-red-400 text-center">⚠️ {t.reset}</h3>
+          <p className="text-center text-slate-300 mb-4">{t.resetAll}</p>
+          <div className="flex gap-2">
+            <button onClick={confirmReset} className="flex-1 min-h-[44px] bg-red-600 rounded-lg font-bold">{t.yes}</button>
+            <button onClick={() => setActiveModal(null)} className="flex-1 min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.no}</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Settings modal */}
+    {activeModal === 'intervals' && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-slate-500 max-w-xs w-full modal-content">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-black">{t.configureStints}</h3>
+            <button
+              onClick={toggleLanguage}
+              className="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-sm font-bold"
+            >
+              {language === 'en' ? 'ES' : 'EN'}
+            </button>
+          </div>
+          <div className="space-y-3 mb-4">
+            <div>
+              <div className="text-xs font-bold text-blue-400 mb-1">🏀 {t.onCourtConfig}</div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="text-emerald-400">{t.greenToYellow}</label>
+                  <div className="flex gap-1">
+                    <input type="number" min="0" max="10" value={intervals.green.minutes} onChange={(e) => setIntervals({...intervals, green: {...intervals.green, minutes: parseInt(e.target.value) || 0}})} className="w-full bg-slate-700 px-2 py-1 rounded" />
+                    <input type="number" min="0" max="59" value={intervals.green.seconds} onChange={(e) => setIntervals({...intervals, green: {...intervals.green, seconds: parseInt(e.target.value) || 0}})} className="w-full bg-slate-700 px-2 py-1 rounded" />
                   </div>
                 </div>
-              ) : (
-                <div
-                  className="text-xl sm:text-2xl font-black cursor-pointer"
-                  onClick={() => {
-                    setGameRunning(false);
-                    setEditGameTimeForm({
-                      minutes: Math.floor(gameTime / 60),
-                      seconds: gameTime % 60
-                    });
-                    setEditingGameTime(true);
-                  }}
-                >
-                  {formatGameTime(gameTime)}
+                <div>
+                  <label className="text-amber-400">{t.yellowToRed}</label>
+                  <div className="flex gap-1">
+                    <input type="number" min="0" max="10" value={intervals.yellow.minutes} onChange={(e) => setIntervals({...intervals, yellow: {...intervals.yellow, minutes: parseInt(e.target.value) || 0}})} className="w-full bg-slate-700 px-2 py-1 rounded" />
+                    <input type="number" min="0" max="59" value={intervals.yellow.seconds} onChange={(e) => setIntervals({...intervals, yellow: {...intervals.yellow, seconds: parseInt(e.target.value) || 0}})} className="w-full bg-slate-700 px-2 py-1 rounded" />
+                  </div>
                 </div>
-              )}
-              {showQuarterSelector && (
-                <div className="absolute mt-16 bg-gray-800 rounded-lg shadow-xl z-20 p-1 flex gap-1">
-                  {[1,2,3,4].map(q => (
-                    <button key={q} onClick={() => {setCurrentQuarter(q); setShowQuarterSelector(false);}} className={`px-3 py-1 rounded text-sm font-bold ${currentQuarter === q ? 'bg-orange-600' : 'bg-gray-700'}`}>
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              )}
+              </div>
             </div>
-            <div className={`${!isHomeTeam ? 'bg-red-800 border-red-400' : 'bg-red-900/50 border-red-600'} border-2 rounded-lg p-2 text-center`}>
-              {editingTeam === 'away' ? (
-                <input type="text" defaultValue={awayTeam} onBlur={(e) => { setAwayTeam(e.target.value || 'Away'); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayTeam(e.target.value || 'Away'); setEditingTeam(null); }}} className="bg-gray-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
-              ) : (
-                <div className="text-xs sm:text-sm text-red-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('away')}>{awayTeam}</div>
-              )}
-              {editingScore === 'away' ? (
-                <input type="number" min="0" defaultValue={awayScore} onBlur={(e) => { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-gray-900 px-2 py-2 rounded text-center font-black text-white w-full text-2xl" autoFocus />
-              ) : (
-                <div className="text-2xl sm:text-3xl font-black cursor-pointer" onClick={() => setEditingScore('away')}>{awayScore}</div>
-              )}
+            <div>
+              <div className="text-xs font-bold text-slate-400 mb-1">💺 {t.benchConfig}</div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="text-red-400">{t.redToYellow}</label>
+                  <div className="flex gap-1">
+                    <input type="number" min="0" max="10" value={benchIntervals.red.minutes} onChange={(e) => setBenchIntervals({...benchIntervals, red: {...benchIntervals.red, minutes: parseInt(e.target.value) || 0}})} className="w-full bg-slate-700 px-2 py-1 rounded" />
+                    <input type="number" min="0" max="59" value={benchIntervals.red.seconds} onChange={(e) => setBenchIntervals({...benchIntervals, red: {...benchIntervals.red, seconds: parseInt(e.target.value) || 0}})} className="w-full bg-slate-700 px-2 py-1 rounded" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-amber-400">{t.yellowToGreen}</label>
+                  <div className="flex gap-1">
+                    <input type="number" min="0" max="10" value={benchIntervals.yellow.minutes} onChange={(e) => setBenchIntervals({...benchIntervals, yellow: {...benchIntervals.yellow, minutes: parseInt(e.target.value) || 0}})} className="w-full bg-slate-700 px-2 py-1 rounded" />
+                    <input type="number" min="0" max="59" value={benchIntervals.yellow.seconds} onChange={(e) => setBenchIntervals({...benchIntervals, yellow: {...benchIntervals.yellow, seconds: parseInt(e.target.value) || 0}})} className="w-full bg-slate-700 px-2 py-1 rounded" />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
+          <button onClick={() => setActiveModal(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.close}</button>
+        </div>
+      </div>
+    )}
 
+    {/* ===== MAIN GAME LAYOUT ===== */}
+    <div className="min-h-screen bg-slate-900 text-white" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <div className="max-w-7xl mx-auto">
+
+        {/* STICKY SCOREBOARD + CONTROLS */}
+        <div className="sticky top-0 z-30 bg-slate-900 p-2 sm:p-3 pb-0">
+          <div className="bg-slate-800 rounded-lg p-2 sm:p-3 border border-slate-700">
+            {/* Score */}
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <div className={`${isHomeTeam ? 'bg-blue-800 border-blue-400' : 'bg-blue-900/50 border-blue-600'} border-2 rounded-lg p-2 text-center`}>
+                {editingTeam === 'home' ? (
+                  <input type="text" defaultValue={homeTeam} onBlur={(e) => { setHomeTeam(e.target.value || 'Home'); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeTeam(e.target.value || 'Home'); setEditingTeam(null); }}} className="bg-slate-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
+                ) : (
+                  <div className="text-xs sm:text-sm text-blue-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('home')}>{homeTeam}</div>
+                )}
+                {editingScore === 'home' ? (
+                  <input type="number" min="0" defaultValue={homeScore} onBlur={(e) => { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />
+                ) : (
+                  <div className="text-3xl sm:text-4xl md:text-5xl font-black cursor-pointer" onClick={() => setEditingScore('home')}>{homeScore}</div>
+                )}
+              </div>
+              <div className="flex flex-col items-center justify-center">
+                <div onClick={() => setShowQuarterSelector(!showQuarterSelector)} className="text-sm font-bold text-orange-400 cursor-pointer">Q{currentQuarter}</div>
+                {editingGameTime ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <input type="number" min="0" max="10" value={editGameTimeForm.minutes} onChange={(e) => setEditGameTimeForm({...editGameTimeForm, minutes: parseInt(e.target.value) || 0})} className="w-12 sm:w-14 bg-slate-900 px-2 py-2 rounded text-center font-black text-white text-lg" autoFocus />
+                      <span className="font-black text-xl">:</span>
+                      <input type="number" min="0" max="59" value={editGameTimeForm.seconds} onChange={(e) => setEditGameTimeForm({...editGameTimeForm, seconds: Math.min(59, parseInt(e.target.value) || 0)})} className="w-12 sm:w-14 bg-slate-900 px-2 py-2 rounded text-center font-black text-white text-lg" />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { setGameTime(Math.max(0, Math.min(600, (editGameTimeForm.minutes * 60) + editGameTimeForm.seconds))); setEditingGameTime(false); }} className="bg-emerald-600 px-4 py-2 rounded text-sm font-bold active:bg-emerald-500">✓</button>
+                      <button onClick={() => setEditingGameTime(false)} className="bg-red-600 px-4 py-2 rounded text-sm font-bold active:bg-red-500">✗</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-2xl sm:text-3xl font-black cursor-pointer" onClick={() => { setGameRunning(false); setEditGameTimeForm({ minutes: Math.floor(gameTime / 60), seconds: gameTime % 60 }); setEditingGameTime(true); }}>
+                    {formatGameTime(gameTime)}
+                  </div>
+                )}
+                {showQuarterSelector && (
+                  <div className="absolute mt-16 bg-slate-800 rounded-lg shadow-xl z-20 p-1.5 flex gap-1.5">
+                    {[1,2,3,4].map(q => (
+                      <button key={q} onClick={() => {setCurrentQuarter(q); setShowQuarterSelector(false);}} className={`min-w-[44px] min-h-[44px] rounded-lg text-sm font-bold flex items-center justify-center ${currentQuarter === q ? 'bg-orange-600' : 'bg-slate-700'}`}>{q}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className={`${!isHomeTeam ? 'bg-red-800 border-red-400' : 'bg-red-900/50 border-red-600'} border-2 rounded-lg p-2 text-center`}>
+                {editingTeam === 'away' ? (
+                  <input type="text" defaultValue={awayTeam} onBlur={(e) => { setAwayTeam(e.target.value || 'Away'); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayTeam(e.target.value || 'Away'); setEditingTeam(null); }}} className="bg-slate-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
+                ) : (
+                  <div className="text-xs sm:text-sm text-red-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('away')}>{awayTeam}</div>
+                )}
+                {editingScore === 'away' ? (
+                  <input type="number" min="0" defaultValue={awayScore} onBlur={(e) => { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />
+                ) : (
+                  <div className="text-3xl sm:text-4xl md:text-5xl font-black cursor-pointer" onClick={() => setEditingScore('away')}>{awayScore}</div>
+                )}
+              </div>
+            </div>
+
+            {/* Action buttons -- partials moved below sticky */}
+
+            {/* Action buttons */}
+            <div className="flex gap-1.5">
+              <div className="flex flex-col gap-1.5" style={{width: 'calc(33.33% - 3px)'}}>
+                <button onClick={toggleGameRunning} className={`min-h-[72px] rounded-lg font-bold text-lg flex flex-col items-center justify-center gap-0.5 ${gameRunning ? 'bg-orange-600 active:bg-orange-500 animate-pulse' : 'bg-emerald-600 active:bg-emerald-500'}`}>
+                  {gameRunning ? <Pause className="w-7 h-7" /> : <Play className="w-7 h-7" />}
+                  <span className="text-xs">{gameRunning ? t.pause : t.play}</span>
+                </button>
+                <div className="flex items-center justify-center bg-slate-700 rounded-lg py-1.5">
+                  <Users className="w-4 h-4 text-blue-400" />
+                  <span className={`text-sm font-bold ml-1 ${onCourtCount === 5 ? 'text-emerald-400' : 'text-red-400'}`}>{onCourtCount}/5</span>
+                </div>
+              </div>
+              <div className="flex-1 grid grid-cols-4 grid-rows-[3fr_2fr] md:grid-rows-[2fr_1fr] gap-1.5">
+                <button onClick={() => { setSelectedPoints(3); setActiveModal('score'); }} className="bg-purple-600 active:bg-purple-500 rounded-lg font-black text-lg flex items-center justify-center min-h-[56px]">+3</button>
+                <button onClick={() => { setSelectedPoints(2); setActiveModal('score'); }} className="bg-blue-600 active:bg-blue-500 rounded-lg font-black text-lg flex items-center justify-center min-h-[56px]">+2</button>
+                <button onClick={() => { setSelectedPoints(1); setActiveModal('score'); }} className="bg-emerald-600 active:bg-emerald-500 rounded-lg font-black text-lg flex items-center justify-center min-h-[56px]">+1</button>
+                <button onClick={() => setActiveModal('foul')} className="bg-amber-600 active:bg-amber-500 rounded-lg font-black text-lg flex items-center justify-center min-h-[56px]">
+                  <Bell className="w-6 h-6" />
+                </button>
+                <button
+                  onMouseDown={handleResetMouseDown}
+                  onMouseUp={handleResetMouseUp}
+                  onMouseLeave={handleResetMouseLeave}
+                  onTouchStart={handleResetMouseDown}
+                  onTouchEnd={handleResetMouseUp}
+                  className={`min-h-[44px] rounded-lg font-bold text-sm flex items-center justify-center ${actionHistory.length > 0 ? 'bg-red-600' : 'bg-slate-600'}`}
+                >
+                  <Undo2 className="w-4 h-4" />
+                </button>
+                <button onClick={() => setActiveModal('intervals')} className="min-h-[44px] bg-slate-600 rounded-lg flex items-center justify-center">
+                  <Settings className="w-4 h-4" />
+                </button>
+                <button onClick={generateReport} className="min-h-[44px] bg-blue-600 rounded-lg flex items-center justify-center">
+                  <Download className="w-4 h-4" />
+                </button>
+                <button onClick={() => setActiveModal('exit')} className="min-h-[44px] bg-orange-600 rounded-lg flex items-center justify-center">
+                  <XCircle className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* PARTIAL SCORES + COURT WARNING (outside sticky to reduce height) */}
+        <div className="px-2 sm:px-3 pt-1">
           {/* Partial Scores */}
           {(() => {
             const partials = getCurrentPartialScores();
             const getPartialColor = (us, them) => {
-              if (us === 0 && them === 0) return 'bg-gray-700 text-gray-400';
-              if (us > them) return 'bg-green-700 text-green-100';
+              if (us === 0 && them === 0) return 'bg-slate-700 text-slate-400';
+              if (us > them) return 'bg-emerald-700 text-emerald-100';
               if (us < them) return 'bg-red-700 text-red-100';
               return 'bg-orange-600 text-orange-100';
             };
             const currentHalf = gameTime > 300 ? 'first' : 'second';
             return (
-              <div className="grid grid-cols-4 gap-1 mb-2">
+              <div className="grid grid-cols-4 gap-1 mb-1">
                 {[1, 2, 3, 4].map(q => {
                   const qPartials = partials[q];
                   const firstColor = getPartialColor(qPartials.first.us, qPartials.first.them);
@@ -1444,7 +1574,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                   const isSecondHalfCurrent = isCurrentQ && currentHalf === 'second';
                   return (
                     <div key={q} className="rounded p-1">
-                      <div className="text-xs text-center text-gray-400 font-bold mb-0.5">Q{q}</div>
+                      <div className="text-xs text-center text-slate-400 font-bold mb-0.5">Q{q}</div>
                       <div className="flex gap-0.5">
                         <div className={`flex-1 ${firstColor} rounded px-1 py-0.5 text-center ${isFirstHalfCurrent ? 'ring-2 ring-orange-400' : ''}`}>
                           <span className="text-xs font-bold">{qPartials.first.us}-{qPartials.first.them}</span>
@@ -1463,329 +1593,220 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
             );
           })()}
 
-          {/* Aviso de jugadores en pista */}
+          {/* Court warning */}
           {courtWarning && (
-            <div className="bg-red-600 text-white text-center py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-3">
+            <div className="bg-red-600 text-white text-center py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-3 mb-1">
               <span>{courtWarning}</span>
-              <button onClick={() => setCourtWarning(null)} className="bg-white text-red-600 px-3 py-0.5 rounded font-bold text-xs">OK</button>
+              <button onClick={() => setCourtWarning(null)} className="bg-white text-red-600 px-3 py-0.5 rounded font-bold text-xs">{t.ok}</button>
+            </div>
+          )}
+        </div>
+
+        {/* SCROLLABLE CONTENT */}
+        <div className="p-2 sm:p-3 pt-2 space-y-2 sm:space-y-3">
+
+          {/* ON COURT — with compact/expanded toggle */}
+          <div className="bg-blue-900/30 rounded-lg p-2 border border-blue-700">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="bg-blue-600 px-2 py-0.5 rounded text-xs font-bold">{t.onCourt}</span>
+                <span className="text-xs font-bold">{onCourtCount}/5</span>
+              </div>
+              <button
+                onClick={() => setCompactView(!compactView)}
+                className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold"
+              >
+                {compactView ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                {compactView ? t.expanded : t.compact}
+              </button>
+            </div>
+            {compactView ? (
+              <div className="space-y-1">
+                {onCourtPlayers.length === 0 ? (
+                  <div className="text-center py-4 text-slate-500 text-sm">{t.select5Players}</div>
+                ) : (
+                  onCourtPlayers.map(p => renderPlayerCard(p, false))
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                {onCourtPlayers.length === 0 ? (
+                  <div className="col-span-3 sm:col-span-4 text-center py-4 text-slate-500 text-sm">{t.select5Players}</div>
+                ) : (
+                  onCourtPlayers.map(p => renderPlayerCard(p, false))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* SUB RECOMMENDATIONS — compact, only if there are any */}
+          {subRecommendations.length > 0 && (
+            <div className="bg-slate-800 rounded-lg p-2 sm:p-3 border border-orange-700">
+              <h3 className="font-black text-sm mb-2 text-orange-400 flex items-center gap-2">
+                <RefreshCw className="w-4 h-4" />{t.subRecommendations}
+              </h3>
+              <div className="space-y-1.5">
+                {subRecommendations.map((rec, idx) => (
+                  <div key={idx} className={`${rec.isFoulIssue ? 'bg-orange-900/30 border-orange-600' : 'bg-slate-700/50 border-slate-600'} border rounded-lg p-2`}>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-red-400 font-black text-xs">⬇</span>
+                      <span className="text-xs font-black text-white">#{rec.out.number} {rec.out.name}</span>
+                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${rec.isFoulIssue ? 'bg-orange-600 text-white' : 'bg-slate-600 text-white'}`}>
+                        {renderReason(rec.reason)}
+                      </span>
+                      <span className="text-emerald-400 font-black text-xs ml-1">⬆ {t.subIn}</span>
+                      {rec.suggestions.map(s => {
+                        const benchStatus = getBenchTimeStatus(s);
+                        const statusColor = benchStatus === 'green'
+                          ? 'bg-emerald-600 border-emerald-400 hover:bg-emerald-500'
+                          : benchStatus === 'yellow'
+                          ? 'bg-amber-600 border-amber-400 hover:bg-amber-500'
+                          : 'bg-red-600 border-red-400 hover:bg-red-500';
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={() => executeSub(rec.out.id, s.id)}
+                            className={`text-xs font-bold text-white ${s.isPlayingOutOfPosition ? 'bg-purple-600 border-purple-400 hover:bg-purple-500' : statusColor} border px-2 py-1 rounded cursor-pointer transition-colors active:opacity-80`}
+                          >
+                            #{s.number} {s.name} ({formatTime(s.currentMinutes)} | {s.fouls}F)
+                            {s.isPlayingOutOfPosition && <span className="ml-1 text-yellow-300">⚠️ {s.originalPosition}→{s.playingAs}</span>}
+                          </button>
+                        );
+                      })}
+                      {rec.suggestions.length === 0 && (
+                        <span className="text-xs text-slate-400">{t.noPlayersAvailable}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
-          {/* Action buttons */}
-          <div className="flex gap-1.5">
-            {/* Play + contador a la izquierda */}
-            <div className="flex flex-col gap-1.5" style={{width: 'calc(33.33% - 3px)'}}>
-              <button onClick={toggleGameRunning} className={`aspect-square md:aspect-auto md:py-4 rounded-lg font-bold text-lg flex flex-col items-center justify-center gap-0.5 ${gameRunning ? 'bg-orange-600 active:bg-orange-500' : 'bg-green-600 active:bg-green-500'}`}>
-                {gameRunning ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
-                <span className="text-xs">{gameRunning ? 'PAUSE' : 'PLAY'}</span>
-              </button>
-              <div className="flex items-center justify-center bg-gray-700 rounded-lg py-1.5">
-                <Users className="w-4 h-4 text-blue-400" />
-                <span className={`text-sm font-bold ml-1 ${onCourtCount === 5 ? 'text-green-400' : 'text-red-400'}`}>{onCourtCount}/5</span>
-              </div>
-            </div>
-            {/* Puntos/falta + secundarios a la derecha */}
-            <div className="flex-1 grid grid-cols-4 grid-rows-[3fr_2fr] md:grid-rows-[2fr_1fr] gap-1.5">
-              <button onClick={() => { setSelectedPoints(3); setActiveModal('score'); }} className="bg-purple-600 active:bg-purple-500 rounded-lg font-black text-lg flex items-center justify-center">+3</button>
-              <button onClick={() => { setSelectedPoints(2); setActiveModal('score'); }} className="bg-blue-600 active:bg-blue-500 rounded-lg font-black text-lg flex items-center justify-center">+2</button>
-              <button onClick={() => { setSelectedPoints(1); setActiveModal('score'); }} className="bg-green-600 active:bg-green-500 rounded-lg font-black text-lg flex items-center justify-center">+1</button>
-              <button onClick={() => setActiveModal('foul')} className="bg-yellow-600 active:bg-yellow-500 rounded-lg font-black text-lg flex items-center justify-center">
-                <Bell className="w-6 h-6" />
-              </button>
-              <button
-                onMouseDown={handleResetMouseDown}
-                onMouseUp={handleResetMouseUp}
-                onMouseLeave={handleResetMouseLeave}
-                onTouchStart={handleResetMouseDown}
-                onTouchEnd={handleResetMouseUp}
-                className={`py-1.5 rounded-lg font-bold text-sm flex items-center justify-center ${actionHistory.length > 0 ? 'bg-red-600' : 'bg-gray-600'}`}
-              >
-                <Undo2 className="w-4 h-4" />
-              </button>
-              <button onClick={() => setActiveModal('intervals')} className="py-1.5 bg-gray-600 rounded-lg flex items-center justify-center">
-                <Settings className="w-4 h-4" />
-              </button>
-              <button onClick={generateReport} className="py-1.5 bg-blue-600 rounded-lg flex items-center justify-center">
-                <Download className="w-4 h-4" />
-              </button>
-              <button onClick={() => setActiveModal('exit')} className="py-1.5 bg-orange-600 rounded-lg flex items-center justify-center" title="Salir del partido">
-                <XCircle className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* PLAYERS GRID */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
-          {/* ON COURT */}
-          <div className="bg-blue-900/30 rounded-lg p-2 border border-blue-700">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="bg-blue-600 px-2 py-0.5 rounded text-xs font-bold">EN PISTA</span>
-              <span className="text-xs font-bold">{onCourtCount}/5</span>
-            </div>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-              {onCourtPlayers.length === 0 ? (
-                <div className="col-span-3 sm:col-span-4 text-center py-4 text-gray-500 text-sm">Selecciona 5 jugadores</div>
-              ) : (
-                onCourtPlayers.map(p => (
-                  <PlayerCard
-                    key={p.id}
-                    player={p}
-                    isRosterView={false}
-                    currentQuarter={currentQuarter}
-                    editingPlayer={editingPlayer}
-                    editForm={editForm}
-                    onEditFormChange={setEditForm}
-                    onStartEditing={startEditingPlayer}
-                    onSaveEdit={savePlayerEdit}
-                    onCancelEdit={cancelPlayerEdit}
-                    onToggleCourt={toggleCourt}
-                    onAdjustFouls={adjustFouls}
-                    getCourtTimeStatus={getCourtTimeStatus}
-                    getBenchTimeStatus={getBenchTimeStatus}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-
           {/* BENCH */}
-          <div className="bg-gray-800/50 rounded-lg p-2 border border-gray-700">
-            <div className="mb-2">
-              <span className="bg-gray-600 px-2 py-0.5 rounded text-xs font-bold">BANQUILLO</span>
+          <div className="bg-slate-800/50 rounded-lg p-2 border border-slate-700">
+            <div className="flex items-center justify-between mb-2">
+              <span className="bg-slate-600 px-2 py-0.5 rounded text-xs font-bold">{t.bench}</span>
+              {!compactView && (
+                <button
+                  onClick={() => setCompactView(true)}
+                  className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold"
+                >
+                  <EyeOff className="w-3 h-3" />{t.compact}
+                </button>
+              )}
             </div>
 
             {/* Bases */}
             <div className="mb-2">
-              <div className="text-xs font-bold text-blue-400 mb-1">BASES</div>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                {bases.map(p => (
-                  <PlayerCard
-                    key={p.id}
-                    player={p}
-                    isRosterView={true}
-                    currentQuarter={currentQuarter}
-                    editingPlayer={editingPlayer}
-                    editForm={editForm}
-                    onEditFormChange={setEditForm}
-                    onStartEditing={startEditingPlayer}
-                    onSaveEdit={savePlayerEdit}
-                    onCancelEdit={cancelPlayerEdit}
-                    onToggleCourt={toggleCourt}
-                    onAdjustFouls={adjustFouls}
-                    getCourtTimeStatus={getCourtTimeStatus}
-                    getBenchTimeStatus={getBenchTimeStatus}
-                  />
-                ))}
-              </div>
+              <div className="text-xs font-bold text-blue-400 mb-1">{t.bases}</div>
+              {compactView ? (
+                <div className="space-y-1">
+                  {bases.map(p => renderPlayerCard(p, true))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                  {bases.map(p => renderPlayerCard(p, true))}
+                </div>
+              )}
             </div>
 
             {/* Aleros */}
             <div className="mb-2">
-              <div className="text-xs font-bold text-green-400 mb-1">ALEROS</div>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                {aleros.map(p => (
-                  <PlayerCard
-                    key={p.id}
-                    player={p}
-                    isRosterView={true}
-                    currentQuarter={currentQuarter}
-                    editingPlayer={editingPlayer}
-                    editForm={editForm}
-                    onEditFormChange={setEditForm}
-                    onStartEditing={startEditingPlayer}
-                    onSaveEdit={savePlayerEdit}
-                    onCancelEdit={cancelPlayerEdit}
-                    onToggleCourt={toggleCourt}
-                    onAdjustFouls={adjustFouls}
-                    getCourtTimeStatus={getCourtTimeStatus}
-                    getBenchTimeStatus={getBenchTimeStatus}
-                  />
-                ))}
-              </div>
+              <div className="text-xs font-bold text-emerald-400 mb-1">{t.aleros}</div>
+              {compactView ? (
+                <div className="space-y-1">
+                  {aleros.map(p => renderPlayerCard(p, true))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                  {aleros.map(p => renderPlayerCard(p, true))}
+                </div>
+              )}
             </div>
 
             {/* Jokers */}
             <div className="mb-2">
-              <div className="text-xs font-bold text-purple-400 mb-1">JOKER</div>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                {jokers.map(p => (
-                  <PlayerCard
-                    key={p.id}
-                    player={p}
-                    isRosterView={true}
-                    currentQuarter={currentQuarter}
-                    editingPlayer={editingPlayer}
-                    editForm={editForm}
-                    onEditFormChange={setEditForm}
-                    onStartEditing={startEditingPlayer}
-                    onSaveEdit={savePlayerEdit}
-                    onCancelEdit={cancelPlayerEdit}
-                    onToggleCourt={toggleCourt}
-                    onAdjustFouls={adjustFouls}
-                    getCourtTimeStatus={getCourtTimeStatus}
-                    getBenchTimeStatus={getBenchTimeStatus}
-                  />
-                ))}
-              </div>
+              <div className="text-xs font-bold text-purple-400 mb-1">{t.jokers}</div>
+              {compactView ? (
+                <div className="space-y-1">
+                  {jokers.map(p => renderPlayerCard(p, true))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                  {jokers.map(p => renderPlayerCard(p, true))}
+                </div>
+              )}
             </div>
 
             {/* Unselected */}
             {unselected.length > 0 && (
               <div>
-                <div className="text-xs font-bold text-gray-400 mb-1">NO CONV.</div>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                  {unselected.map(p => (
-                    <PlayerCard
-                      key={p.id}
-                      player={p}
-                      isRosterView={true}
-                      currentQuarter={currentQuarter}
-                      editingPlayer={editingPlayer}
-                      editForm={editForm}
-                      onEditFormChange={setEditForm}
-                      onStartEditing={startEditingPlayer}
-                      onSaveEdit={savePlayerEdit}
-                      onCancelEdit={cancelPlayerEdit}
-                      onToggleCourt={toggleCourt}
-                      onAdjustFouls={adjustFouls}
-                      getCourtTimeStatus={getCourtTimeStatus}
-                      getBenchTimeStatus={getBenchTimeStatus}
-                    />
-                  ))}
-                </div>
+                <div className="text-xs font-bold text-slate-400 mb-1">{t.inactive}</div>
+                {compactView ? (
+                  <div className="space-y-1">
+                    {unselected.map(p => renderPlayerCard(p, true))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                    {unselected.map(p => renderPlayerCard(p, true))}
+                  </div>
+                )}
               </div>
             )}
           </div>
-        </div>
 
-        {/* MODALS */}
-        {activeModal === 'fouledOut' && fouledOutPlayer && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-4 border-2 border-red-500 max-w-sm w-full">
-              <div className="text-center mb-3">
-                <XCircle className="w-12 h-12 text-red-500 mx-auto mb-2" />
-                <h3 className="text-xl font-black text-red-400">FOULED OUT</h3>
-                <p className="font-bold">#{fouledOutPlayer.number} {fouledOutPlayer.name}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                {fouledOutReplacements.map(s => (
-                  <button key={s.id} onClick={() => subInPlayer(s.id)} className={`${s.isPlayingOutOfPosition ? 'bg-purple-600 active:bg-purple-500' : 'bg-green-600 active:bg-green-500'} rounded-lg p-3 font-bold text-left`}>
-                    <div>#{s.number} {s.name}</div>
-                    <div className="text-xs opacity-80">
-                      {formatTime(s.currentMinutes)}
-                      {s.isPlayingOutOfPosition && <span className="ml-1 text-yellow-300">⚠️ {s.originalPosition}→{s.playingAs}</span>}
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => { setActiveModal(null); setFouledOutPlayer(null); }} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CERRAR</button>
-            </div>
-          </div>
-        )}
-
-        {activeModal === 'foul' && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-4 border-2 border-yellow-500 max-w-sm w-full">
-              <h3 className="text-lg font-black mb-3 text-yellow-400 text-center">¿Quién hizo falta?</h3>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                {onCourtPlayers.map(player => (
-                  <button key={player.id} onClick={() => addFoulToPlayer(player.id)} className="bg-yellow-700 active:bg-yellow-600 rounded-lg p-3 font-bold text-left">
-                    <div className="flex justify-between items-center">
-                      <span>#{player.number} {player.name}</span>
-                      <span className={`${getFoulBgClass(player.fouls, currentQuarter)} px-2 py-0.5 rounded text-sm`}>{player.fouls}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => setActiveModal(null)} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CANCELAR</button>
-            </div>
-          </div>
-        )}
-
-        {activeModal === 'score' && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-4 border-2 border-orange-500 max-w-sm w-full">
-              <h3 className="text-lg font-black mb-3 text-orange-400 text-center">¿Quién anotó {selectedPoints}?</h3>
-              <div className="mb-3">
-                <div className="text-xs font-bold text-blue-400 mb-1">{ourTeamName}</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {onCourtPlayers.map(player => (
-                    <button key={player.id} onClick={() => addPoints(player.id)} className="bg-blue-700 active:bg-blue-600 rounded-lg p-2 font-bold text-sm">
-                      #{player.number} {player.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <button onClick={addRivalPoints} className="w-full py-2 bg-red-700 active:bg-red-600 rounded-lg font-bold mb-2">
-                +{selectedPoints} {rivalTeamName}
+          {/* FOULS — collapsable, only if there are warning/danger players */}
+          {hasFoulWarnings && (
+            <div className="bg-slate-800 rounded-lg border border-slate-700">
+              <button
+                onClick={() => setShowFouls(!showFouls)}
+                className="w-full p-2 sm:p-3 flex items-center justify-between"
+              >
+                <h3 className="font-black text-sm text-amber-400 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />{t.fouls} — Q{currentQuarter}
+                  <span className="bg-amber-600 text-white text-xs px-1.5 py-0.5 rounded-full">{warningPlayers.length + dangerPlayers.length}</span>
+                </h3>
+                {showFouls ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
               </button>
-              <button onClick={() => { setActiveModal(null); setSelectedPoints(null); }} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CANCELAR</button>
-            </div>
-          </div>
-        )}
-
-        {activeModal === 'reset' && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-4 border-2 border-red-500 max-w-xs w-full">
-              <h3 className="text-lg font-black mb-2 text-red-400 text-center">⚠️ RESET</h3>
-              <p className="text-center text-gray-300 mb-4">¿Resetear todo?</p>
-              <div className="flex gap-2">
-                <button onClick={confirmReset} className="flex-1 py-2 bg-red-600 rounded-lg font-bold">SÍ</button>
-                <button onClick={() => setActiveModal(null)} className="flex-1 py-2 bg-gray-600 rounded-lg font-bold">NO</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeModal === 'intervals' && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-4 border-2 border-gray-500 max-w-xs w-full">
-              <h3 className="text-lg font-black mb-3 text-center">Configurar Stints</h3>
-              <div className="space-y-3 mb-4">
-                <div>
-                  <div className="text-xs font-bold text-blue-400 mb-1">🏀 EN PISTA</div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <label className="text-green-400">Verde→Amarillo</label>
-                      <div className="flex gap-1">
-                        <input type="number" min="0" max="10" value={intervals.green.minutes} onChange={(e) => setIntervals({...intervals, green: {...intervals.green, minutes: parseInt(e.target.value) || 0}})} className="w-full bg-gray-700 px-2 py-1 rounded" />
-                        <input type="number" min="0" max="59" value={intervals.green.seconds} onChange={(e) => setIntervals({...intervals, green: {...intervals.green, seconds: parseInt(e.target.value) || 0}})} className="w-full bg-gray-700 px-2 py-1 rounded" />
+              {showFouls && (
+                <div className="px-2 sm:px-3 pb-2 sm:pb-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-amber-900/30 border border-amber-600 rounded-lg p-2">
+                      <div className="flex items-center gap-1 mb-1">
+                        <AlertTriangle className="w-3 h-3 text-amber-400" />
+                        <span className="font-bold text-amber-400 text-xs">{t.warning}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {warningPlayers.map(p => (
+                          <span key={p.id} className="text-xs font-semibold text-white bg-amber-800/60 px-2 py-0.5 rounded">
+                            #{p.number} {p.name}
+                          </span>
+                        ))}
+                        {warningPlayers.length === 0 && <span className="text-xs text-slate-500">-</span>}
                       </div>
                     </div>
-                    <div>
-                      <label className="text-yellow-400">Amarillo→Rojo</label>
-                      <div className="flex gap-1">
-                        <input type="number" min="0" max="10" value={intervals.yellow.minutes} onChange={(e) => setIntervals({...intervals, yellow: {...intervals.yellow, minutes: parseInt(e.target.value) || 0}})} className="w-full bg-gray-700 px-2 py-1 rounded" />
-                        <input type="number" min="0" max="59" value={intervals.yellow.seconds} onChange={(e) => setIntervals({...intervals, yellow: {...intervals.yellow, seconds: parseInt(e.target.value) || 0}})} className="w-full bg-gray-700 px-2 py-1 rounded" />
+                    <div className="bg-red-900/30 border border-red-600 rounded-lg p-2">
+                      <div className="flex items-center gap-1 mb-1">
+                        <XCircle className="w-3 h-3 text-red-400" />
+                        <span className="font-bold text-red-400 text-xs">{t.danger}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {dangerPlayers.map(p => (
+                          <span key={p.id} className="text-xs font-semibold text-white bg-red-800/60 px-2 py-0.5 rounded">
+                            #{p.number} {p.name}
+                          </span>
+                        ))}
+                        {dangerPlayers.length === 0 && <span className="text-xs text-slate-500">-</span>}
                       </div>
                     </div>
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs font-bold text-gray-400 mb-1">💺 BANQUILLO</div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <label className="text-red-400">Rojo→Amarillo</label>
-                      <div className="flex gap-1">
-                        <input type="number" min="0" max="10" value={benchIntervals.red.minutes} onChange={(e) => setBenchIntervals({...benchIntervals, red: {...benchIntervals.red, minutes: parseInt(e.target.value) || 0}})} className="w-full bg-gray-700 px-2 py-1 rounded" />
-                        <input type="number" min="0" max="59" value={benchIntervals.red.seconds} onChange={(e) => setBenchIntervals({...benchIntervals, red: {...benchIntervals.red, seconds: parseInt(e.target.value) || 0}})} className="w-full bg-gray-700 px-2 py-1 rounded" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-yellow-400">Amarillo→Verde</label>
-                      <div className="flex gap-1">
-                        <input type="number" min="0" max="10" value={benchIntervals.yellow.minutes} onChange={(e) => setBenchIntervals({...benchIntervals, yellow: {...benchIntervals.yellow, minutes: parseInt(e.target.value) || 0}})} className="w-full bg-gray-700 px-2 py-1 rounded" />
-                        <input type="number" min="0" max="59" value={benchIntervals.yellow.seconds} onChange={(e) => setBenchIntervals({...benchIntervals, yellow: {...benchIntervals.yellow, seconds: parseInt(e.target.value) || 0}})} className="w-full bg-gray-700 px-2 py-1 rounded" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <button onClick={() => setActiveModal(null)} className="w-full py-2 bg-gray-600 rounded-lg font-bold">CERRAR</button>
+              )}
             </div>
-          </div>
-        )}
+          )}
+
+        </div>
       </div>
     </div>
     </>

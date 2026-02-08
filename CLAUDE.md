@@ -1,5 +1,10 @@
 # Basketball Rotation App
 
+## Proceso de trabajo
+- **Antes de empezar una fase nueva:** SIEMPRE revisar la página de Notion (PlayStats App) por si Diego ha dejado comentarios, notas o cambios entre sesiones. Notion page ID: `300f1a9a-784a-805b-b6ab-daa25dd098b9`
+- **Durante el trabajo:** Documentar avances en Notion (Development Log) además de en CLAUDE.md
+- **Decisión de negocio:** Construir todo completo, decidir boundaries freemium después
+
 ## Qué es esta app
 App para gestionar rotaciones de jugadores de baloncesto durante un partido. Diseñada para ayudar al entrenador a:
 - Controlar cuánto tiempo lleva cada jugador en pista y en banquillo
@@ -17,15 +22,18 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - **Componente principal:** `BasketballRotationTracker.jsx` (~1,710 líneas)
 - **Archivos extraídos:**
   - `src/lib/gameUtils.js` - funciones de utilidad (formatTime, getFoulStatus, etc.)
-  - `src/components/PlayerCard.jsx` - componente de tarjeta de jugador
+  - `src/components/PlayerCard.jsx` - componente de tarjeta de jugador (con vista compacta y expandida)
   - `src/lib/generateReport.js` - generación de reportes HTML
+  - `src/i18n/translations.js` - traducciones EN/ES (~40+ keys)
+  - `src/context/LanguageContext.jsx` - context + hook useTranslation()
+  - `src/hooks/useSwipeGesture.js` - detección de swipe horizontal
 - **Guardado:** Solo Supabase (via `onGameSaved` + `syncManager`). El localStorage legacy fue eliminado.
 - **Modales:** Unificados en un solo `activeModal` useState (valores: null, 'exit', 'reset', 'quarter', 'intervals', 'score', 'foul', 'fouledOut')
 - **PWA (Progressive Web App)** - Se puede instalar como app en móvil
 - **Desplegada en:** https://dpdb13.github.io/playstats-basketball/
 - **Nombre oficial:** PlayStats Basketball
 - **Service Worker:** Auto-actualización implementada (detecta nueva versión y recarga automáticamente)
-- **Cache actual:** `basketball-rotation-v21`
+- **Cache actual:** `basketball-rotation-v23`
 - **Manifest:** `orientation: "any"` (permite horizontal y vertical)
 
 ## Funcionalidades implementadas
@@ -277,6 +285,53 @@ Cada evento vinculado al quinteto que estaba jugando → permite correlaciones p
 - Función `get_team_by_invite_code` existe en Supabase pero no está en `supabase-schema.sql` versionado
 
 ## Historial de conversaciones
+
+### 8 febrero 2026 - Sesión 11: Fase 2 UI/UX Overhaul + Agent Teams Review + Deploy
+
+**Fase 2 implementada (10/12 items):**
+- i18n EN/ES con toggle (LanguageContext + translations.js, ~40+ keys, localStorage)
+- Paleta de colores: 14 → 6 (gray→slate, green→emerald, yellow→amber, cyan eliminado)
+- Marcador sticky top con tipografía grande (text-3xl sm:text-4xl md:text-5xl)
+- Layout reordenado: Marcador → En Pista → Recomendaciones → Banquillo → Faltas
+- PlayerCard compacta: una línea por jugador (toggle Eye/EyeOff)
+- Faltas colapsable: solo visible cuando hay jugadores en peligro
+- Recomendaciones compactas: una línea por recomendación con reasons estructurados
+- Botones: Play 72px+pulse, Score 56px, Secondary 44px (Apple HIG)
+- Animaciones modales: fadeIn + slideUp (CSS keyframes)
+- Swipe left = abrir modal de salida (useSwipeGesture hook)
+- Items diferidos: posiciones configurables, formato de partido configurable
+
+**Agent Teams adversarial review (3 agentes: qa-tester, ux-reviewer, code-architect):**
+6 bugs encontrados y corregidos:
+1. Compact IN/OUT button: 36px → 44px
+2. Swipe vertical ratio: 0.75 → 0.5 (menos falsos positivos)
+3. Sticky zone reducida: parciales fuera del sticky
+4. BUG-D: undo de 5ta falta restaura estado completo (currentMinutes, stints, stintPlusMinus, etc.)
+5. BUG-G: preventDefault en touchEnd del undo (evita doble-disparo en móvil)
+6. Quarter selector buttons: min 44x44px
+
+**Archivos nuevos:** translations.js, LanguageContext.jsx, useSwipeGesture.js
+**Archivos modificados:** BasketballRotationTracker.jsx, PlayerCard.jsx, App.jsx, index.css
+**Build:** exitoso, code review pasado
+**Cache:** v22 → v23, desplegado a GitHub Pages
+**Notion:** actualizado con Development Log y checklist de Fase 2
+
+### 8 febrero 2026 - Sesión 10: Fase 0 ejecutada + eventLog + Deploy
+
+**Fase 0 completada al 86% (6/7 items):**
+- **BUG-1 fix** (`App.jsx`): `secondary_positions` ahora se pasa al tracker. Cross-position recommendations funcionan.
+- **BUG-2 fix** (`App.jsx` + `gameUtils.js`): IDs cambiados de `index+1` a UUID de Supabase. `getQuintetKey` usa string sort.
+- **BUG-7 fix** (`BasketballRotationTracker.jsx`): Undo guarda/restaura estado completo del jugador (currentMinutes, lastToggle, totalCourtTime, totalBenchTime, stints, stintPlusMinus, currentStintStart).
+- **eventLog implementado**: Score events (nuestro equipo + rival) y foul events (delta>0) se registran con: timestamp, gameTime, quarter, type, team, playerId, value, lineupOnCourt. Undo elimina entries correspondientes.
+- **version: 2** añadido a `getFullGameState()` y `createNewGame()`.
+- **App.css eliminado** (código muerto del template Vite).
+- **BUG-3 diferido** a Fase 3: setState dentro de setState funciona con React 18+ batching.
+- Code review pasado sin bugs. Build exitoso.
+- Cache bumpeado a v22, desplegado a GitHub Pages.
+- **Notion actualizado** con progreso de Fase 0 y Development Log.
+- **Decisión estratégica**: Construir todo completo, decidir boundaries freemium después.
+
+---
 
 ### 3 febrero 2026 - Sesión 8: Navegación por gestos
 
