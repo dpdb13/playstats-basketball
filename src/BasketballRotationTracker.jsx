@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Undo2, RefreshCw, Bell, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
 import PlayStatsIcon from './components/PlayStatsIcon';
 import { addToQueue } from './lib/syncManager';
-import { formatTime, formatGameTime, getFoulStatus, getFoulBgClass, getQuintetKey, createInitialPlayerState, INITIAL_PARTIAL_SCORES } from './lib/gameUtils';
+import { formatTime, formatGameTime, getFoulStatus, getFoulBgClass, getQuintetKey, createInitialPlayerState, createInitialPartialScores } from './lib/gameUtils';
 import { generateReport as generateReportHTML } from './lib/generateReport';
 import PlayerCard from './components/PlayerCard';
 import { useTranslation } from './context/LanguageContext';
@@ -19,7 +19,7 @@ const generateGameId = () => crypto.randomUUID();
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
-export default function BasketballRotationTracker({ initialPlayers, onExit, onGameSaved, savedGameData, teamId, userId, showExitConfirm, onDismissExitConfirm }) {
+export default function BasketballRotationTracker({ initialPlayers, onExit, onGameSaved, savedGameData, teamId, userId, showExitConfirm, onDismissExitConfirm, teamName }) {
   // Jugadores: usar initialPlayers prop
   const effectivePlayers = initialPlayers || [];
 
@@ -79,7 +79,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const [leadChanges, setLeadChanges] = useState(() => savedGameData?.leadChanges ?? 0);
   const [ties, setTies] = useState(() => savedGameData?.ties ?? 0);
   const [biggestLead, setBiggestLead] = useState(() => savedGameData?.biggestLead || { us: 0, them: 0 });
-  const [partialScores, setPartialScores] = useState(() => savedGameData?.partialScores || INITIAL_PARTIAL_SCORES);
+  const [partialScores, setPartialScores] = useState(() => savedGameData?.partialScores || createInitialPartialScores());
   const [eventLog, setEventLog] = useState(() => savedGameData?.eventLog || []);
 
   // Refs
@@ -88,9 +88,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
 
   // i18n + UI states
   const { t, language, toggleLanguage } = useTranslation();
-  const [compactView, setCompactView] = useState(true);
+  const [courtExpanded, setCourtExpanded] = useState(false);
+  const [benchExpanded, setBenchExpanded] = useState(false);
   const [showFouls, setShowFouls] = useState(false);
-  const [showCrossPosition, setShowCrossPosition] = useState(false);
+  const [freeThrowCount, setFreeThrowCount] = useState(null);
+  const [expandedCrossPosition, setExpandedCrossPosition] = useState({});
 
   // Show exit modal when back button/gesture triggers from App
   useEffect(() => {
@@ -122,8 +124,10 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setGameRunning(false);
     setGameTime(600);
     setCurrentQuarter(1);
-    setHomeTeam(t.home);
-    setAwayTeam(t.away);
+    const resolvedHomeTeam = isHome ? (teamName || t.home) : t.home;
+    const resolvedAwayTeam = isHome ? t.away : (teamName || t.away);
+    setHomeTeam(resolvedHomeTeam);
+    setAwayTeam(resolvedAwayTeam);
     setHomeScore(0);
     setAwayScore(0);
     setRotationHistory([]);
@@ -135,7 +139,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setLeadChanges(0);
     setTies(0);
     setBiggestLead({ us: 0, them: 0 });
-    setPartialScores(INITIAL_PARTIAL_SCORES);
+    setPartialScores(createInitialPartialScores());
     setEventLog([]);
 
     setCurrentScreen('game');
@@ -150,8 +154,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         gameRunning: false,
         gameTime: 600,
         currentQuarter: 1,
-        homeTeam: t.home,
-        awayTeam: t.away,
+        homeTeam: resolvedHomeTeam,
+        awayTeam: resolvedAwayTeam,
         homeScore: 0,
         awayScore: 0,
         rotationHistory: [],
@@ -163,7 +167,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         leadChanges: 0,
         ties: 0,
         biggestLead: { us: 0, them: 0 },
-        partialScores: INITIAL_PARTIAL_SCORES,
+        partialScores: createInitialPartialScores(),
         eventLog: [],
         version: 2,
         status: 'in_progress',
@@ -171,7 +175,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       };
       onGameSaved(initialState).catch(err => console.error('Error saving new game to Supabase:', err));
     }
-  }, [effectivePlayers, onGameSaved, t]);
+  }, [effectivePlayers, onGameSaved, t, teamName]);
 
   // Obtener estado completo del partido para sincronizar
   const getFullGameState = useCallback(() => ({
@@ -986,10 +990,33 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         p.id === lastAction.playerId ? { ...p, missedShots: Math.max(0, (p.missedShots || 0) - 1) } : p
       ));
       setEventLog(prev => prev.slice(0, -1));
+    } else if (lastAction.type === 'freeThrow') {
+      const actionQuarter = lastAction.quarter || currentQuarter;
+      // Undo points
+      if (lastAction.madeCount > 0) {
+        if (isHomeTeam) setHomeScore(prev => prev - lastAction.madeCount);
+        else setAwayScore(prev => prev - lastAction.madeCount);
+        setScoresByQuarter(prev => ({
+          ...prev,
+          [actionQuarter]: {
+            ...prev[actionQuarter],
+            us: prev[actionQuarter].us - lastAction.madeCount
+          }
+        }));
+      }
+      // Undo player stats
+      setPlayers(prev => prev.map(p =>
+        p.id === lastAction.playerId
+          ? { ...p, points: p.points - lastAction.madeCount, missedShots: Math.max(0, (p.missedShots || 0) - lastAction.missedCount) }
+          : p
+      ));
+      // Remove all eventLog entries for this FT sequence (madeCount + missedCount entries)
+      const totalEvents = lastAction.madeCount + lastAction.missedCount;
+      setEventLog(prev => prev.slice(0, -totalEvents));
     }
 
     // Remove corresponding eventLog entry for score/foul actions
-    // Note: 'miss' eventLog removal is handled in its own case above
+    // Note: 'miss' and 'freeThrow' eventLog removal is handled in their own cases above
     if (lastAction.type === 'score' || (lastAction.type === 'foul' && lastAction.delta > 0)) {
       setEventLog(prev => prev.slice(0, -1));
     }
@@ -1027,6 +1054,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setRotationHistory([]);
     setHomeTeam(t.home);
     setAwayTeam(t.away);
+    // Note: confirmReset goes back to team-selection, so teamName auto-fill not needed here
     setHomeScore(0);
     setAwayScore(0);
     setGameStarted(false);
@@ -1041,7 +1069,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setLeadChanges(0);
     setTies(0);
     setBiggestLead({ us: 0, them: 0 });
-    setPartialScores(INITIAL_PARTIAL_SCORES);
+    setPartialScores(createInitialPartialScores());
     setEventLog([]);
 
     // Volver
@@ -1162,6 +1190,85 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setSelectedPoints(null);
     setSelectedScorePlayer(null);
   }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter, gameTime, players]);
+
+  const addFreeThrows = useCallback((playerId, madeCount) => {
+    const missedCount = freeThrowCount - madeCount;
+    const { ourScore, rivalScore } = getCurrentScores();
+
+    if (madeCount > 0) {
+      updateGameFlow(ourScore + madeCount, rivalScore);
+
+      if (isHomeTeam) setHomeScore(prev => prev + madeCount);
+      else setAwayScore(prev => prev + madeCount);
+
+      setPlayers(prev => prev.map(p =>
+        p.id === playerId ? { ...p, points: p.points + madeCount, missedShots: (p.missedShots || 0) + missedCount } : p
+      ));
+
+      setScoresByQuarter(prev => ({
+        ...prev,
+        [currentQuarter]: {
+          ...prev[currentQuarter],
+          us: prev[currentQuarter].us + madeCount
+        }
+      }));
+    } else {
+      // All missed
+      setPlayers(prev => prev.map(p =>
+        p.id === playerId ? { ...p, missedShots: (p.missedShots || 0) + missedCount } : p
+      ));
+    }
+
+    // Add individual events to eventLog
+    const lineupOnCourt = players.filter(p => p.onCourt).map(p => p.id);
+    const now = Date.now();
+    const newEvents = [];
+    for (let i = 0; i < madeCount; i++) {
+      newEvents.push({
+        timestamp: now,
+        gameTime,
+        quarter: currentQuarter,
+        type: 'score',
+        subtype: 'made',
+        team: isHomeTeam ? 'home' : 'away',
+        playerId,
+        assistById: null,
+        value: 1,
+        playType: 'freeThrow',
+        lineupOnCourt
+      });
+    }
+    for (let i = 0; i < missedCount; i++) {
+      newEvents.push({
+        timestamp: now,
+        gameTime,
+        quarter: currentQuarter,
+        type: 'miss',
+        team: isHomeTeam ? 'home' : 'away',
+        playerId,
+        assistById: null,
+        value: 1,
+        playType: 'freeThrow',
+        lineupOnCourt
+      });
+    }
+    setEventLog(prev => [...prev, ...newEvents]);
+
+    // Single actionHistory entry
+    setActionHistory(prev => [...prev, {
+      type: 'freeThrow',
+      playerId,
+      madeCount,
+      missedCount,
+      freeThrowCount,
+      quarter: currentQuarter
+    }]);
+
+    setActiveModal(null);
+    setSelectedPoints(null);
+    setSelectedScorePlayer(null);
+    setFreeThrowCount(null);
+  }, [freeThrowCount, getCurrentScores, updateGameFlow, isHomeTeam, currentQuarter, gameTime, players]);
 
   const executeSub = useCallback((outId, inId) => {
     const outPlayer = players.find(p => p.id === outId);
@@ -1347,11 +1454,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
           </div>
           <h2 className="text-lg font-bold text-center mb-6 text-slate-300">{t.teamPlaysAs}</h2>
           <div className="grid grid-cols-2 gap-4">
-            <button onClick={() => createNewGame(true)} className="bg-blue-700 hover:bg-blue-600 active:bg-blue-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-blue-400 min-h-[100px]">
+            <button onClick={() => createNewGame(true)} className="bg-orange-500 hover:bg-orange-400 active:bg-orange-300 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-orange-300 min-h-[100px]">
               <div className="text-3xl sm:text-4xl mb-2">🏠</div>
               <div className="text-lg sm:text-xl">{t.home}</div>
             </button>
-            <button onClick={() => createNewGame(false)} className="bg-red-700 hover:bg-red-600 active:bg-red-500 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-red-400 min-h-[100px]">
+            <button onClick={() => createNewGame(false)} className="bg-sky-500 hover:bg-sky-400 active:bg-sky-300 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-sky-300 min-h-[100px]">
               <div className="text-3xl sm:text-4xl mb-2">✈️</div>
               <div className="text-lg sm:text-xl">{t.away}</div>
             </button>
@@ -1366,12 +1473,12 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   // ============================================
 
   // Helper para renderizar PlayerCard con todas las props comunes
-  const renderPlayerCard = (p, isRosterView) => (
+  const renderPlayerCard = (p, isRosterView, sectionExpanded) => (
     <PlayerCard
       key={p.id}
       player={p}
       isRosterView={isRosterView}
-      compact={compactView}
+      compact={!sectionExpanded}
       currentQuarter={currentQuarter}
       editingPlayer={editingPlayer}
       editForm={editForm}
@@ -1466,18 +1573,18 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         <div className="bg-slate-800 rounded-xl p-4 border-2 border-orange-500 max-w-sm w-full modal-content">
           {!selectedScorePlayer ? (
             <>
-              <h3 className="text-lg font-black mb-3 text-orange-400 text-center">{t.whoScored(selectedPoints)}</h3>
+              <h3 className="text-lg font-black mb-3 text-orange-400 text-center">{t.whosShooting} ({selectedPoints} {selectedPoints === 1 ? 'PT' : 'PTS'})</h3>
               <div className="mb-3">
-                <div className="text-xs font-bold text-blue-400 mb-1">{ourTeamName}</div>
+                <div className="text-xs font-bold text-orange-400 mb-1">{ourTeamName}</div>
                 <div className="grid grid-cols-2 gap-2">
                   {onCourtPlayers.map(player => (
-                    <button key={player.id} onClick={() => setSelectedScorePlayer({ id: player.id, name: player.name, number: player.number })} className="bg-blue-700 active:bg-blue-600 rounded-lg min-h-[48px] p-2 font-bold text-sm">
+                    <button key={player.id} onClick={() => setSelectedScorePlayer({ id: player.id, name: player.name, number: player.number })} className="bg-orange-500 active:bg-orange-400 rounded-lg min-h-[48px] p-2 font-bold text-sm">
                       #{player.number} {player.name}
                     </button>
                   ))}
                 </div>
               </div>
-              <button onClick={addRivalPoints} className="w-full min-h-[48px] bg-red-700 active:bg-red-600 rounded-lg font-bold mb-2">
+              <button onClick={addRivalPoints} className="w-full min-h-[48px] bg-sky-500 active:bg-sky-400 rounded-lg font-bold mb-2">
                 +{selectedPoints} {rivalTeamName}
               </button>
               <button onClick={() => { setActiveModal(null); setSelectedPoints(null); }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
@@ -1487,12 +1594,74 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               <h3 className="text-lg font-black mb-1 text-orange-400 text-center">#{selectedScorePlayer.number} {selectedScorePlayer.name}</h3>
               <p className="text-center text-slate-400 text-sm mb-4">{selectedPoints} {selectedPoints === 1 ? 'PT' : 'PTS'}</p>
               <div className="flex gap-3 mb-3">
-                <button onClick={() => addPoints(selectedScorePlayer.id, false)} className="flex-1 min-h-[64px] bg-emerald-600 active:bg-emerald-500 rounded-xl font-black text-xl flex items-center justify-center gap-2">
+                <button onClick={() => addPoints(selectedScorePlayer.id, false)} className="flex-1 min-h-[64px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-xl flex items-center justify-center gap-2">
                   ✓ {t.made}
                 </button>
-                <button onClick={() => addPoints(selectedScorePlayer.id, true)} className="flex-1 min-h-[64px] bg-red-600 active:bg-red-500 rounded-xl font-black text-xl flex items-center justify-center gap-2">
+                <button onClick={() => addPoints(selectedScorePlayer.id, true)} className="flex-1 min-h-[64px] bg-rose-500 active:bg-rose-400 rounded-xl font-black text-xl flex items-center justify-center gap-2">
                   ✗ {t.missed}
                 </button>
+              </div>
+              <button onClick={() => setSelectedScorePlayer(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+            </>
+          )}
+        </div>
+      </div>
+    )}
+
+    {/* Free throw count selector — Step 1: How many FTs? */}
+    {activeModal === 'freeThrowCount' && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-emerald-500 max-w-sm w-full modal-content">
+          <h3 className="text-lg font-black mb-4 text-emerald-400 text-center">{t.howManyFT}</h3>
+          <div className="flex gap-3 mb-3">
+            {[1, 2, 3].map(n => (
+              <button
+                key={n}
+                onClick={() => { setFreeThrowCount(n); setSelectedPoints(1); setActiveModal('freeThrowPlayer'); }}
+                className="flex-1 min-h-[64px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-2xl flex items-center justify-center"
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => { setActiveModal(null); setFreeThrowCount(null); }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
+        </div>
+      </div>
+    )}
+
+    {/* Free throw player selector — Step 2: Who's shooting? */}
+    {activeModal === 'freeThrowPlayer' && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-emerald-500 max-w-sm w-full modal-content">
+          {!selectedScorePlayer ? (
+            <>
+              <h3 className="text-lg font-black mb-3 text-emerald-400 text-center">{t.whosShooting} ({freeThrowCount} FT)</h3>
+              <div className="mb-3">
+                <div className="text-xs font-bold text-orange-400 mb-1">{ourTeamName}</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {onCourtPlayers.map(player => (
+                    <button key={player.id} onClick={() => setSelectedScorePlayer({ id: player.id, name: player.name, number: player.number })} className="bg-orange-500 active:bg-orange-400 rounded-lg min-h-[48px] p-2 font-bold text-sm">
+                      #{player.number} {player.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button onClick={() => { setActiveModal('freeThrowCount'); setSelectedScorePlayer(null); setSelectedPoints(null); }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+            </>
+          ) : (
+            <>
+              <h3 className="text-lg font-black mb-1 text-emerald-400 text-center">#{selectedScorePlayer.number} {selectedScorePlayer.name}</h3>
+              <p className="text-center text-slate-400 text-sm mb-4">{t.howManyMade} ({freeThrowCount} FT)</p>
+              <div className="flex gap-3 mb-3">
+                {Array.from({ length: freeThrowCount + 1 }, (_, i) => i).map(n => (
+                  <button
+                    key={n}
+                    onClick={() => addFreeThrows(selectedScorePlayer.id, n)}
+                    className={`flex-1 min-h-[64px] rounded-xl font-black text-2xl flex items-center justify-center ${n === 0 ? 'bg-rose-500 active:bg-rose-400' : 'bg-emerald-500 active:bg-emerald-400'}`}
+                  >
+                    {n}
+                  </button>
+                ))}
               </div>
               <button onClick={() => setSelectedScorePlayer(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
             </>
@@ -1518,7 +1687,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                 <button
                   key={player.id}
                   onClick={() => { toggleCourt(player.id); setPendingReplacement(null); }}
-                  className={`rounded-lg min-h-[48px] p-2 font-bold text-sm active:opacity-80 ${player.position === outPos ? 'bg-emerald-700 active:bg-emerald-600' : (player.secondary_positions || []).includes(outPos) ? 'bg-blue-700 active:bg-blue-600' : 'bg-slate-600 active:bg-slate-500'}`}
+                  className={`rounded-lg min-h-[48px] p-2 font-bold text-sm active:opacity-80 ${player.position === outPos ? 'bg-emerald-500 active:bg-emerald-400' : (player.secondary_positions || []).includes(outPos) ? 'bg-blue-500 active:bg-blue-400' : 'bg-slate-600 active:bg-slate-500'}`}
                 >
                   #{player.number} {player.name}
                   {player.position !== outPos && (player.secondary_positions || []).includes(outPos) && (
@@ -1614,11 +1783,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
           <div className="bg-slate-800 rounded-lg p-2 sm:p-3 border border-slate-700">
             {/* Score */}
             <div className="grid grid-cols-3 gap-2 mb-2">
-              <div className={`${isHomeTeam ? 'bg-blue-800 border-blue-400' : 'bg-blue-900/50 border-blue-600'} border-2 rounded-lg p-2 text-center`}>
+              <div className={`${isHomeTeam ? 'bg-orange-800 border-orange-400' : 'bg-orange-900/50 border-orange-600'} border-2 rounded-lg p-2 text-center`}>
                 {editingTeam === 'home' ? (
                   <input type="text" defaultValue={homeTeam} onBlur={(e) => { setHomeTeam(e.target.value || t.home); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeTeam(e.target.value || t.home); setEditingTeam(null); }}} className="bg-slate-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
                 ) : (
-                  <div className="text-xs sm:text-sm text-blue-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('home')}>{homeTeam}</div>
+                  <div className="text-xs sm:text-sm text-orange-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('home')}>{homeTeam}</div>
                 )}
                 {editingScore === 'home' ? (
                   <input type="number" min="0" defaultValue={homeScore} onBlur={(e) => { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />
@@ -1653,11 +1822,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                   </div>
                 )}
               </div>
-              <div className={`${!isHomeTeam ? 'bg-red-800 border-red-400' : 'bg-red-900/50 border-red-600'} border-2 rounded-lg p-2 text-center`}>
+              <div className={`${!isHomeTeam ? 'bg-sky-800 border-sky-400' : 'bg-sky-900/50 border-sky-600'} border-2 rounded-lg p-2 text-center`}>
                 {editingTeam === 'away' ? (
                   <input type="text" defaultValue={awayTeam} onBlur={(e) => { setAwayTeam(e.target.value || t.away); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayTeam(e.target.value || t.away); setEditingTeam(null); }}} className="bg-slate-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
                 ) : (
-                  <div className="text-xs sm:text-sm text-red-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('away')}>{awayTeam}</div>
+                  <div className="text-xs sm:text-sm text-sky-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('away')}>{awayTeam}</div>
                 )}
                 {editingScore === 'away' ? (
                   <input type="number" min="0" defaultValue={awayScore} onBlur={(e) => { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />
@@ -1682,9 +1851,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                 </div>
               </div>
               <div className="flex-1 grid grid-cols-4 grid-rows-[3fr_2fr] md:grid-rows-[2fr_1fr] gap-1.5">
-                <button onClick={() => { setSelectedPoints(3); setActiveModal('score'); setPendingReplacement(null); }} className="bg-orange-500/20 text-orange-300 border border-orange-500/30 active:bg-orange-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts3}</button>
+                <button onClick={() => { setSelectedPoints(3); setActiveModal('score'); setPendingReplacement(null); }} className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 active:bg-indigo-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts3}</button>
                 <button onClick={() => { setSelectedPoints(2); setActiveModal('score'); setPendingReplacement(null); }} className="bg-blue-500/20 text-blue-300 border border-blue-500/30 active:bg-blue-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts2}</button>
-                <button onClick={() => { setSelectedPoints(1); setActiveModal('score'); setPendingReplacement(null); }} className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 active:bg-emerald-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts1}</button>
+                <button onClick={() => { setActiveModal('freeThrowCount'); setPendingReplacement(null); }} className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 active:bg-emerald-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts1}</button>
                 <button onClick={() => { setActiveModal('foul'); setPendingReplacement(null); }} className="bg-amber-600 active:bg-amber-500 rounded-lg font-black text-lg flex items-center justify-center min-h-[56px]">
                   <Bell className="w-6 h-6" />
                 </button>
@@ -1817,7 +1986,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         {/* SCROLLABLE CONTENT */}
         <div className="p-2 sm:p-3 pt-2 space-y-2 sm:space-y-3">
 
-          {/* ON COURT — with compact/expanded toggle */}
+          {/* ON COURT — with per-section expand toggle */}
           <div className="bg-blue-900/30 rounded-lg p-2 border border-blue-700">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
@@ -1825,19 +1994,18 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                 <span className="text-xs font-bold">{onCourtCount}/5</span>
               </div>
               <button
-                onClick={() => setCompactView(!compactView)}
-                className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold"
+                onClick={() => setCourtExpanded(!courtExpanded)}
+                className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold min-h-[32px]"
               >
-                {compactView ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                {compactView ? t.expanded : t.compact}
+                {courtExpanded ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
               </button>
             </div>
-            {compactView ? (
+            {!courtExpanded ? (
               <div className="space-y-1">
                 {onCourtPlayers.length === 0 ? (
                   <div className="text-center py-4 text-slate-500 text-sm">{t.select5Players}</div>
                 ) : (
-                  onCourtPlayers.map(p => renderPlayerCard(p, false))
+                  onCourtPlayers.map(p => renderPlayerCard(p, false, courtExpanded))
                 )}
               </div>
             ) : (
@@ -1845,15 +2013,14 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                 {onCourtPlayers.length === 0 ? (
                   <div className="col-span-3 sm:col-span-4 text-center py-4 text-slate-500 text-sm">{t.select5Players}</div>
                 ) : (
-                  onCourtPlayers.map(p => renderPlayerCard(p, false))
+                  onCourtPlayers.map(p => renderPlayerCard(p, false, courtExpanded))
                 )}
               </div>
             )}
           </div>
 
-          {/* SUB RECOMMENDATIONS — split: same-position direct, cross-position toggle */}
+          {/* SUB RECOMMENDATIONS — per-player cross-position expand */}
           {subRecommendations.length > 0 && (() => {
-            const totalCross = subRecommendations.reduce((sum, r) => sum + r.crossPositionSuggestions.length, 0);
             const renderSuggestionBtn = (s, outId) => {
               const benchStatus = getBenchTimeStatus(s);
               const statusColor = benchStatus === 'green'
@@ -1891,36 +2058,23 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                         {rec.samePositionSuggestions.length === 0 && rec.crossPositionSuggestions.length === 0 && (
                           <span className="text-xs text-slate-400">{t.noPlayersAvailable}</span>
                         )}
+                        {rec.crossPositionSuggestions.length > 0 && (
+                          <button
+                            onClick={() => setExpandedCrossPosition(prev => ({ ...prev, [rec.out.id]: !prev[rec.out.id] }))}
+                            className="text-xs font-bold text-purple-400 bg-purple-600/30 border border-purple-500 px-1.5 py-0.5 rounded hover:bg-purple-600/50 min-h-[24px]"
+                          >
+                            {expandedCrossPosition[rec.out.id] ? '▲' : '▼'} {rec.crossPositionSuggestions.length}
+                          </button>
+                        )}
                       </div>
+                      {rec.crossPositionSuggestions.length > 0 && expandedCrossPosition[rec.out.id] && (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5 pl-4">
+                          {rec.crossPositionSuggestions.map(s => renderSuggestionBtn(s, rec.out.id))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
-                {/* Cross-position toggle */}
-                {totalCross > 0 && (
-                  <div className="mt-2">
-                    <button
-                      onClick={() => setShowCrossPosition(!showCrossPosition)}
-                      className="flex items-center gap-1.5 text-xs font-bold text-purple-400 hover:text-purple-300"
-                    >
-                      {showCrossPosition ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      {t.crossPositionOptions} <span className="bg-purple-600 text-white px-1.5 py-0.5 rounded-full text-xs">{totalCross}</span>
-                    </button>
-                    {showCrossPosition && (
-                      <div className="space-y-1.5 mt-1.5">
-                        {subRecommendations.filter(r => r.crossPositionSuggestions.length > 0).map((rec, idx) => (
-                          <div key={idx} className="bg-purple-900/20 border border-purple-600 rounded-lg p-2">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-red-400 font-black text-xs">⬇</span>
-                              <span className="text-xs font-black text-white">#{rec.out.number} {rec.out.name}</span>
-                              <span className="text-emerald-400 font-black text-xs ml-1">⬆ {t.subIn}</span>
-                              {rec.crossPositionSuggestions.map(s => renderSuggestionBtn(s, rec.out.id))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })()}
@@ -1929,14 +2083,12 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
           <div className="bg-slate-800/50 rounded-lg p-2 border border-slate-700">
             <div className="flex items-center justify-between mb-2">
               <span className="bg-slate-600 px-2 py-0.5 rounded text-xs font-bold">{t.bench}</span>
-              {!compactView && (
-                <button
-                  onClick={() => setCompactView(true)}
-                  className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold"
-                >
-                  <EyeOff className="w-3 h-3" />{t.compact}
-                </button>
-              )}
+              <button
+                onClick={() => setBenchExpanded(!benchExpanded)}
+                className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold min-h-[32px]"
+              >
+                {benchExpanded ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+              </button>
             </div>
 
             {/* Dynamic position groups */}
@@ -1946,13 +2098,13 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               return (
                 <div key={pos} className="mb-2">
                   <div className="text-xs font-bold text-blue-400 mb-1">{pos}</div>
-                  {compactView ? (
+                  {!benchExpanded ? (
                     <div className="space-y-1">
-                      {posPlayers.map(p => renderPlayerCard(p, true))}
+                      {posPlayers.map(p => renderPlayerCard(p, true, benchExpanded))}
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                      {posPlayers.map(p => renderPlayerCard(p, true))}
+                      {posPlayers.map(p => renderPlayerCard(p, true, benchExpanded))}
                     </div>
                   )}
                 </div>
@@ -1963,13 +2115,13 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
             {benchPlayersByPosition.__unselected.length > 0 && (
               <div>
                 <div className="text-xs font-bold text-slate-400 mb-1">{t.inactive}</div>
-                {compactView ? (
+                {!benchExpanded ? (
                   <div className="space-y-1">
-                    {benchPlayersByPosition.__unselected.map(p => renderPlayerCard(p, true))}
+                    {benchPlayersByPosition.__unselected.map(p => renderPlayerCard(p, true, benchExpanded))}
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                    {benchPlayersByPosition.__unselected.map(p => renderPlayerCard(p, true))}
+                    {benchPlayersByPosition.__unselected.map(p => renderPlayerCard(p, true, benchExpanded))}
                   </div>
                 )}
               </div>

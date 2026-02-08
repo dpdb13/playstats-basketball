@@ -1,15 +1,16 @@
 import { useState, useRef } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { useTranslation } from '../context/LanguageContext';
-import { ArrowLeft, Share2, Play, Eye, Trash2, Users, Wifi, WifiOff, Check, X, Camera, RotateCcw } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { ArrowLeft, Share2, Play, Eye, Trash2, Users, Wifi, WifiOff, Check, X, Camera, RotateCcw, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
 import ShareTeamModal from './ShareTeamModal';
 import PlayerRosterEditor from './PlayerRosterEditor';
 import TeamIcon from './TeamIcon';
 import ImageCropper from './ImageCropper';
 import { getTeamPositions, getPositionClasses } from '../lib/gameUtils';
 
-export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) {
-  const { currentTeam, teamGames, teamPlayers, deselectTeam, deleteGame, online, deleteTeam, updateTeam, updateTeamSettings, uploadTeamAvatar } = useTeam();
+export default function TeamDetail({ onStartGame, onContinueGame }) {
+  const { currentTeam, teamGames, teamPlayers, deselectTeam, deleteGame, online, deleteTeam, updateTeam, updateTeamSettings, uploadTeamAvatar, refreshCurrentTeam } = useTeam();
   const { t, language } = useTranslation();
   const [showShare, setShowShare] = useState(false);
   const [activeTab, setActiveTab] = useState('games');
@@ -31,6 +32,17 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
   // Position editor state
   const [editingPositions, setEditingPositions] = useState(false);
   const [positionsForm, setPositionsForm] = useState([]);
+
+  // Collapsible game sections
+  const inProgressGames = teamGames.filter(g => g.status === 'in_progress');
+  const completedGames = teamGames.filter(g => g.status !== 'in_progress');
+  const [inProgressExpanded, setInProgressExpanded] = useState(inProgressGames.length > 0);
+  const [completedExpanded, setCompletedExpanded] = useState(false);
+
+  // Game metadata editing
+  const [editingGameId, setEditingGameId] = useState(null);
+  const [gameEditForm, setGameEditForm] = useState({ phase: '', matchday: '', date: '', time: '' });
+  const [savingGameEdit, setSavingGameEdit] = useState(false);
 
   if (!currentTeam) return null;
 
@@ -125,6 +137,77 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
     setShowIconEditor(false);
   };
 
+  // Game metadata editing functions
+  const startEditGame = (game, e) => {
+    if (e) e.stopPropagation();
+    const gameData = game.game_data || {};
+    const existingDate = gameData.customDate || game.created_at;
+    const dateObj = new Date(existingDate);
+    setGameEditForm({
+      phase: gameData.phase || '',
+      matchday: gameData.matchday || '',
+      date: dateObj.toISOString().split('T')[0],
+      time: dateObj.toTimeString().slice(0, 5)
+    });
+    setEditingGameId(game.id);
+  };
+
+  const cancelEditGame = () => {
+    setEditingGameId(null);
+    setGameEditForm({ phase: '', matchday: '', date: '', time: '' });
+  };
+
+  const saveGameEdit = async (game) => {
+    setSavingGameEdit(true);
+    try {
+      const customDate = `${gameEditForm.date}T${gameEditForm.time}:00`;
+      const updatedGameData = {
+        ...(game.game_data || {}),
+        phase: gameEditForm.phase || undefined,
+        matchday: gameEditForm.matchday ? Number(gameEditForm.matchday) : undefined,
+        customDate
+      };
+      // Clean undefined keys
+      Object.keys(updatedGameData).forEach(k => updatedGameData[k] === undefined && delete updatedGameData[k]);
+
+      const { error } = await supabase
+        .from('games')
+        .update({ game_data: updatedGameData, updated_at: new Date().toISOString() })
+        .eq('id', game.id);
+
+      if (error) throw error;
+      await refreshCurrentTeam();
+    } catch { /* ignore */ }
+    setSavingGameEdit(false);
+    setEditingGameId(null);
+  };
+
+  // Helper to get display date for a game (uses customDate if available)
+  const getGameDisplayDate = (game) => {
+    const gameData = game.game_data || {};
+    const dateStr = gameData.customDate || game.updated_at || game.created_at;
+    return new Date(dateStr).toLocaleDateString(dateLocale, {
+      day: 'numeric', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  };
+
+  // Helper to render game metadata badges (phase, matchday)
+  const renderGameMetaBadges = (game) => {
+    const gameData = game.game_data || {};
+    if (!gameData.phase && !gameData.matchday) return null;
+    return (
+      <div className="flex items-center gap-1.5 mb-1">
+        {gameData.phase && (
+          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{gameData.phase}</span>
+        )}
+        {gameData.matchday && (
+          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{t.matchday} {gameData.matchday}</span>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 text-white p-4">
       <div className="max-w-md md:max-w-2xl mx-auto">
@@ -190,7 +273,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Nuevo partido */}
         <button
           onClick={() => onStartGame()}
-          className="w-full mb-4 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 rounded-xl p-3 border-2 border-emerald-400 font-bold flex items-center justify-center gap-2"
+          className="w-full mb-4 bg-orange-500 hover:bg-orange-400 active:bg-orange-300 rounded-xl p-3 border-2 border-orange-300 font-bold flex items-center justify-center gap-2 text-white"
         >
           <Play className="w-5 h-5" /> {t.newGameBtn}
         </button>
@@ -222,76 +305,228 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Seccion: En proceso */}
-                {(() => {
-                  const inProgressGames = teamGames.filter(g => g.status === 'in_progress');
-                  if (inProgressGames.length === 0) return null;
-                  return (
-                    <div>
-                      <h3 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-1.5">
-                        <Play className="w-4 h-4" /> {t.inProgress} ({inProgressGames.length})
-                      </h3>
-                      <div className="space-y-2">
-                        {inProgressGames.map(game => (
-                          <div
-                            key={game.id}
-                            className="bg-slate-800 rounded-xl p-4 border-2 border-amber-500"
-                          >
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="text-xs text-slate-400">
-                                {new Date(game.updated_at || game.created_at).toLocaleDateString(dateLocale, {
-                                  day: 'numeric', month: 'short', year: 'numeric',
-                                  hour: '2-digit', minute: '2-digit'
-                                })}
+                {/* Seccion: En proceso (collapsible) */}
+                <div>
+                  <button
+                    onClick={() => setInProgressExpanded(prev => !prev)}
+                    className="w-full flex items-center justify-between py-2 px-1 group"
+                  >
+                    <h3 className="text-sm font-bold text-amber-400 flex items-center gap-1.5">
+                      <Play className="w-4 h-4" /> {t.inProgressGames}
+                      <span className="text-xs bg-amber-600 text-white px-1.5 py-0.5 rounded-full ml-1">{inProgressGames.length}</span>
+                    </h3>
+                    {inProgressExpanded
+                      ? <ChevronUp className="w-4 h-4 text-slate-400 group-hover:text-white" />
+                      : <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-white" />
+                    }
+                  </button>
+                  {inProgressExpanded && (
+                    <div className="space-y-2 mt-1">
+                      {inProgressGames.length === 0 ? (
+                        <p className="text-xs text-slate-500 px-1">{t.noInProgressGames}</p>
+                      ) : (
+                        inProgressGames.map(game => (
+                          <div key={game.id}>
+                            {editingGameId === game.id ? (
+                              /* Inline edit form */
+                              <div className="bg-slate-800 rounded-xl p-4 border-2 border-orange-500">
+                                <div className="text-sm font-bold text-orange-400 mb-3">{t.editGame}</div>
+                                <div className="space-y-3">
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-400 mb-1">{t.phase}</label>
+                                    <input
+                                      type="text"
+                                      value={gameEditForm.phase}
+                                      onChange={(e) => setGameEditForm(prev => ({ ...prev, phase: e.target.value }))}
+                                      placeholder={t.phasePlaceholder}
+                                      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-orange-500 focus:outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-400 mb-1">{t.matchday}</label>
+                                    <input
+                                      type="number"
+                                      value={gameEditForm.matchday}
+                                      onChange={(e) => setGameEditForm(prev => ({ ...prev, matchday: e.target.value }))}
+                                      placeholder="1, 2, 3..."
+                                      min="1"
+                                      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-orange-500 focus:outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-400 mb-1">{t.dateAndTime}</label>
+                                    <div className="flex gap-2">
+                                      <input
+                                        type="date"
+                                        value={gameEditForm.date}
+                                        onChange={(e) => setGameEditForm(prev => ({ ...prev, date: e.target.value }))}
+                                        className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-orange-500 focus:outline-none"
+                                      />
+                                      <input
+                                        type="time"
+                                        value={gameEditForm.time}
+                                        onChange={(e) => setGameEditForm(prev => ({ ...prev, time: e.target.value }))}
+                                        className="w-28 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-orange-500 focus:outline-none"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2 mt-4">
+                                  <button
+                                    onClick={() => saveGameEdit(game)}
+                                    disabled={savingGameEdit}
+                                    className="flex-1 bg-emerald-500 hover:bg-emerald-400 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
+                                  >
+                                    {savingGameEdit ? t.loading : t.saveChanges}
+                                  </button>
+                                  <button
+                                    onClick={cancelEditGame}
+                                    className="flex-1 bg-slate-600 hover:bg-slate-500 py-2 rounded-lg font-bold text-sm"
+                                  >
+                                    {t.cancel}
+                                  </button>
+                                </div>
                               </div>
-                              <div className="text-xs px-2 py-0.5 rounded font-bold bg-amber-600">
-                                {t.inProgress}
+                            ) : (
+                              /* Normal game card */
+                              <div className="bg-slate-800 rounded-xl p-4 border-2 border-amber-500">
+                                <div className="flex justify-between items-start mb-1">
+                                  <div className="text-xs text-slate-400">
+                                    {getGameDisplayDate(game)}
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="text-xs px-2 py-0.5 rounded font-bold bg-amber-600">
+                                      {t.inProgress}
+                                    </div>
+                                    <button
+                                      onClick={(e) => startEditGame(game, e)}
+                                      className="p-1 bg-slate-700 hover:bg-slate-600 rounded"
+                                      title={t.editGame}
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5 text-slate-300" />
+                                    </button>
+                                  </div>
+                                </div>
+                                {renderGameMetaBadges(game)}
+                                <div className="text-lg font-bold mb-2">
+                                  {game.home_team} {game.home_score}
+                                  <span className="text-slate-500"> - </span>
+                                  {game.away_score} {game.away_team}
+                                </div>
+                                <div className="text-xs text-slate-500 mb-3">
+                                  Q{game.current_quarter} {game.is_home_team ? `- ${t.home}` : `- ${t.away}`}
+                                </div>
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => onContinueGame(game)}
+                                    className="flex-1 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1"
+                                  >
+                                    <Play className="w-4 h-4" /> {t.continue}
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleDeleteGame(game.id, e)}
+                                    className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg font-bold text-sm"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                            <div className="text-lg font-bold mb-2">
-                              {game.home_team} {game.home_score}
-                              <span className="text-slate-500"> - </span>
-                              {game.away_score} {game.away_team}
-                            </div>
-                            <div className="text-xs text-slate-500 mb-3">
-                              Q{game.current_quarter} {game.is_home_team ? `- ${t.home}` : `- ${t.away}`}
-                            </div>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => onContinueGame(game)}
-                                className="flex-1 bg-amber-600 hover:bg-amber-500 active:bg-amber-400 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1"
-                              >
-                                <Play className="w-4 h-4" /> {t.continue}
-                              </button>
-                              <button
-                                onClick={(e) => handleDeleteGame(game.id, e)}
-                                className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg font-bold text-sm"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
+                            )}
                           </div>
-                        ))}
-                      </div>
+                        ))
+                      )}
                     </div>
-                  );
-                })()}
+                  )}
+                </div>
 
-                {/* Seccion: Finalizados */}
-                {(() => {
-                  const completedGames = teamGames.filter(g => g.status !== 'in_progress');
-                  if (completedGames.length === 0) return null;
-                  return (
-                    <div>
-                      <h3 className="text-sm font-bold text-emerald-400 mb-2 flex items-center gap-1.5">
-                        <Check className="w-4 h-4" /> {t.completed} ({completedGames.length})
-                      </h3>
-                      <div className="space-y-2">
-                        {completedGames.map(game => {
+                {/* Seccion: Finalizados (collapsible) */}
+                <div>
+                  <button
+                    onClick={() => setCompletedExpanded(prev => !prev)}
+                    className="w-full flex items-center justify-between py-2 px-1 group"
+                  >
+                    <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-1.5">
+                      <Check className="w-4 h-4" /> {t.completedGames}
+                      <span className="text-xs bg-emerald-600 text-white px-1.5 py-0.5 rounded-full ml-1">{completedGames.length}</span>
+                    </h3>
+                    {completedExpanded
+                      ? <ChevronUp className="w-4 h-4 text-slate-400 group-hover:text-white" />
+                      : <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-white" />
+                    }
+                  </button>
+                  {completedExpanded && (
+                    <div className="space-y-2 mt-1">
+                      {completedGames.length === 0 ? (
+                        <p className="text-xs text-slate-500 px-1">{t.noCompletedGames}</p>
+                      ) : (
+                        completedGames.map(game => {
                           const ourScore = game.is_home_team ? game.home_score : game.away_score;
                           const theirScore = game.is_home_team ? game.away_score : game.home_score;
                           const didWin = ourScore > theirScore;
                           const didLose = ourScore < theirScore;
+
+                          if (editingGameId === game.id) {
+                            return (
+                              <div key={game.id} className="bg-slate-800 rounded-xl p-4 border-2 border-orange-500">
+                                <div className="text-sm font-bold text-orange-400 mb-3">{t.editGame}</div>
+                                <div className="space-y-3">
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-400 mb-1">{t.phase}</label>
+                                    <input
+                                      type="text"
+                                      value={gameEditForm.phase}
+                                      onChange={(e) => setGameEditForm(prev => ({ ...prev, phase: e.target.value }))}
+                                      placeholder={t.phasePlaceholder}
+                                      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-orange-500 focus:outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-400 mb-1">{t.matchday}</label>
+                                    <input
+                                      type="number"
+                                      value={gameEditForm.matchday}
+                                      onChange={(e) => setGameEditForm(prev => ({ ...prev, matchday: e.target.value }))}
+                                      placeholder="1, 2, 3..."
+                                      min="1"
+                                      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-orange-500 focus:outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-400 mb-1">{t.dateAndTime}</label>
+                                    <div className="flex gap-2">
+                                      <input
+                                        type="date"
+                                        value={gameEditForm.date}
+                                        onChange={(e) => setGameEditForm(prev => ({ ...prev, date: e.target.value }))}
+                                        className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-orange-500 focus:outline-none"
+                                      />
+                                      <input
+                                        type="time"
+                                        value={gameEditForm.time}
+                                        onChange={(e) => setGameEditForm(prev => ({ ...prev, time: e.target.value }))}
+                                        className="w-28 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-orange-500 focus:outline-none"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2 mt-4">
+                                  <button
+                                    onClick={() => saveGameEdit(game)}
+                                    disabled={savingGameEdit}
+                                    className="flex-1 bg-emerald-500 hover:bg-emerald-400 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
+                                  >
+                                    {savingGameEdit ? t.loading : t.saveChanges}
+                                  </button>
+                                  <button
+                                    onClick={cancelEditGame}
+                                    className="flex-1 bg-slate-600 hover:bg-slate-500 py-2 rounded-lg font-bold text-sm"
+                                  >
+                                    {t.cancel}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          }
 
                           return (
                             <div
@@ -299,17 +534,21 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                               onClick={() => setSelectedFinishedGame(game)}
                               className="bg-slate-800 rounded-xl p-4 border-2 border-slate-600 hover:border-slate-400 cursor-pointer transition-colors"
                             >
-                              <div className="flex justify-between items-start mb-2">
+                              <div className="flex justify-between items-start mb-1">
                                 <div className="text-xs text-slate-400">
-                                  {new Date(game.updated_at || game.created_at).toLocaleDateString(dateLocale, {
-                                    day: 'numeric', month: 'short', year: 'numeric',
-                                    hour: '2-digit', minute: '2-digit'
-                                  })}
+                                  {getGameDisplayDate(game)}
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1.5">
                                   <div className={`text-xs px-2 py-0.5 rounded font-bold ${didWin ? 'bg-emerald-600' : didLose ? 'bg-red-600' : 'bg-slate-600'}`}>
                                     {didWin ? t.victory : didLose ? t.defeat : t.draw}
                                   </div>
+                                  <button
+                                    onClick={(e) => startEditGame(game, e)}
+                                    className="p-1 bg-slate-700 hover:bg-slate-600 rounded"
+                                    title={t.editGame}
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5 text-slate-300" />
+                                  </button>
                                   <button
                                     onClick={(e) => handleDeleteGame(game.id, e)}
                                     className="p-1 bg-red-600/80 hover:bg-red-500 rounded"
@@ -318,6 +557,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                                   </button>
                                 </div>
                               </div>
+                              {renderGameMetaBadges(game)}
                               <div className="text-lg font-bold mb-1">
                                 <span className={game.is_home_team ? (didWin ? 'text-emerald-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
                                   {game.home_team} {game.home_score}
@@ -332,11 +572,11 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                               </div>
                             </div>
                           );
-                        })}
-                      </div>
+                        })
+                      )}
                     </div>
-                  );
-                })()}
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -438,7 +678,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                 {selectedFinishedGame.home_team} {selectedFinishedGame.home_score} - {selectedFinishedGame.away_score} {selectedFinishedGame.away_team}
               </h3>
               <p className="text-xs text-slate-400 mb-4">
-                {new Date(selectedFinishedGame.updated_at || selectedFinishedGame.created_at).toLocaleDateString(dateLocale, {
+                {new Date(getGameDisplayDate(selectedFinishedGame)).toLocaleDateString(dateLocale, {
                   day: 'numeric', month: 'short', year: 'numeric',
                   hour: '2-digit', minute: '2-digit'
                 })}

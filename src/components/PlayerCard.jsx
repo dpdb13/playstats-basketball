@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { Edit3 } from 'lucide-react';
 import { formatTime, getFoulBgClass } from '../lib/gameUtils';
 import { useTranslation } from '../context/LanguageContext';
 
@@ -34,6 +33,9 @@ const PlayerCard = memo(({
   const [showFoulEditor, setShowFoulEditor] = useState(false);
   const foulTimerRef = useRef(null);
 
+  // Double-tap detection for name editing
+  const lastTapRef = useRef(0);
+
   // Un solo mecanismo para el auto-cierre de 3 segundos
   const startFoulTimer = () => {
     if (foulTimerRef.current) clearTimeout(foulTimerRef.current);
@@ -64,6 +66,18 @@ const PlayerCard = memo(({
     startFoulTimer();
   };
 
+  // Double-tap handler for name
+  const handleNameTap = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      // Double-tap detected
+      lastTapRef.current = 0;
+      onStartEditing(player);
+    } else {
+      lastTapRef.current = now;
+    }
+  };
+
   // Calcular color de barra según tiempo
   const getTimeStatusColor = () => {
     if (isUnselected) return 'bg-slate-500';
@@ -88,10 +102,28 @@ const PlayerCard = memo(({
     }
   };
 
+  // Foul dots for compact view
+  const renderFoulDots = () => {
+    const dots = [];
+    for (let i = 0; i < 5; i++) {
+      dots.push(
+        <span
+          key={i}
+          className={`inline-block w-1.5 h-1.5 rounded-full ${
+            i < player.fouls
+              ? player.fouls >= 4 ? 'bg-rose-500' : player.fouls >= 3 ? 'bg-amber-400' : 'bg-white'
+              : 'bg-slate-600'
+          }`}
+        />
+      );
+    }
+    return dots;
+  };
+
   const borderClass = getTimeBorderClass();
   const dimClass = isRosterView && player.onCourt ? 'opacity-25' : '';
 
-  // Modo edición (click en lápiz)
+  // Modo edición (double-tap en nombre)
   if (isEditing) {
     return (
       <div className="rounded-lg p-2 border-2 border-orange-500 bg-slate-800">
@@ -120,8 +152,8 @@ const PlayerCard = memo(({
           ))}
         </select>
         <div className="flex gap-1">
-          <button onClick={onSaveEdit} className="flex-1 min-h-[44px] bg-emerald-600 rounded text-sm font-bold">✓</button>
-          <button onClick={onCancelEdit} className="flex-1 min-h-[44px] bg-red-600 rounded text-sm font-bold">✗</button>
+          <button onClick={onSaveEdit} className="flex-1 min-h-[44px] bg-emerald-500 rounded text-sm font-bold">✓</button>
+          <button onClick={onCancelEdit} className="flex-1 min-h-[44px] bg-rose-500 rounded text-sm font-bold">✗</button>
         </div>
       </div>
     );
@@ -129,6 +161,7 @@ const PlayerCard = memo(({
 
   // ============================================
   // VISTA COMPACTA — una línea por jugador
+  // Layout: StatusBar | #Number Name | Stint + Court/Bench | Points | Fouls | IN/OUT
   // ============================================
   if (compact) {
     const statusColor = getTimeStatusColor();
@@ -137,25 +170,37 @@ const PlayerCard = memo(({
         {/* Time status bar */}
         <div className={`w-1 h-8 rounded-full ${statusColor} flex-shrink-0`} />
 
-        {/* Number + Name */}
-        <div className="flex items-center gap-1 min-w-0 flex-1">
-          <span className="text-xs font-black text-white bg-black/30 px-1 rounded flex-shrink-0">#{player.number}</span>
+        {/* Number + Name (double-tap to edit) */}
+        <div
+          className="flex items-center gap-1 min-w-0 flex-1"
+          onClick={handleNameTap}
+          style={{ userSelect: 'none', WebkitTouchCallout: 'none' }}
+        >
+          <span className="text-[10px] font-black text-slate-400 bg-black/30 px-1 rounded flex-shrink-0">#{player.number}</span>
           <span className="text-xs font-bold text-white truncate">{player.name}</span>
         </div>
 
-        {/* Stint / Total time */}
-        <span className="text-xs font-bold text-slate-300 tabular-nums flex-shrink-0">{formatTime(player.currentMinutes)}<span className="text-slate-500">/{formatTime(player.totalCourtTime)}</span></span>
+        {/* Stint (prominent) + Court/Bench total (secondary) */}
+        <div className="flex items-baseline gap-0.5 flex-shrink-0 tabular-nums">
+          <span className="text-sm font-black text-white">{formatTime(player.currentMinutes)}</span>
+          <span className="text-[10px] text-slate-500 font-medium">
+            {player.onCourt ? formatTime(player.totalCourtTime) : formatTime(player.totalBenchTime)}
+          </span>
+        </div>
 
         {/* Points */}
-        <span className="text-xs font-bold text-orange-300 tabular-nums flex-shrink-0">{player.points}p</span>
+        <span className="text-xs font-bold text-orange-300 tabular-nums flex-shrink-0 min-w-[20px] text-center">{player.points}p</span>
 
         {/* Fouls */}
         <div className="relative flex-shrink-0">
           <div
             onClick={toggleFoulEditor}
-            className={`${foulBgClass} rounded px-1.5 py-0.5 cursor-pointer active:opacity-70`}
+            className={`${foulBgClass} rounded px-1 py-0.5 cursor-pointer active:opacity-70 flex items-center gap-0.5`}
           >
-            <span className="text-xs font-black text-white">{player.fouls}F</span>
+            <span className="text-xs font-black text-white">{player.fouls}</span>
+            <div className="flex gap-px items-center">
+              {renderFoulDots()}
+            </div>
           </div>
           {showFoulEditor && (
             <>
@@ -164,13 +209,13 @@ const PlayerCard = memo(({
                 <button
                   onClick={() => handleFoulAdjust(-1)}
                   disabled={player.fouls <= 0}
-                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-red-600 active:bg-red-500'}`}
+                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-rose-500 active:bg-rose-400'}`}
                 >-</button>
                 <span className="text-lg font-black text-white w-6 text-center tabular-nums">{player.fouls}</span>
                 <button
                   onClick={() => handleFoulAdjust(1)}
                   disabled={player.fouls >= 5}
-                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-600 active:bg-emerald-500'}`}
+                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-500 active:bg-emerald-400'}`}
                 >+</button>
               </div>
             </>
@@ -181,7 +226,7 @@ const PlayerCard = memo(({
         <button
           onClick={() => onToggleCourt(player.id)}
           disabled={isFouledOut || isUnselected || (isRosterView && player.onCourt)}
-          className={`min-h-[44px] min-w-[44px] px-2 rounded-lg font-bold text-xs flex-shrink-0 ${isFouledOut || isUnselected || (isRosterView && player.onCourt) ? 'bg-slate-600 opacity-50' : player.onCourt ? 'bg-orange-600 active:bg-orange-500' : 'bg-emerald-600 active:bg-emerald-500'}`}
+          className={`min-h-[44px] min-w-[44px] px-2 rounded-lg font-bold text-xs flex-shrink-0 ${isFouledOut || isUnselected || (isRosterView && player.onCourt) ? 'bg-slate-600 opacity-50' : player.onCourt ? 'bg-rose-500 active:bg-rose-400' : 'bg-emerald-500 active:bg-emerald-400'}`}
         >
           {isUnselected ? t.na : player.onCourt ? t.outBtn : t.inBtn}
         </button>
@@ -190,35 +235,63 @@ const PlayerCard = memo(({
   }
 
   // ============================================
-  // VISTA EXPANDIDA — tarjeta completa
+  // VISTA EXPANDIDA — tarjeta completa con stats
   // ============================================
+
+  // Shooting stats: points scored vs missed shots
+  const hasShotData = player.points > 0 || (player.missedShots || 0) > 0;
+
   return (
     <div className={`rounded-lg p-1.5 sm:p-2 md:p-3 border-3 ${borderClass} ${player.onCourt ? 'bg-slate-700' : isUnselected ? 'bg-slate-700 opacity-50' : 'bg-slate-800'} ${dimClass}`}>
+      {/* Header: Number + Name (double-tap to edit) */}
       <div className="flex items-center justify-between mb-1 md:mb-1.5">
-        <div className="flex items-center gap-1 min-w-0 flex-1">
+        <div
+          className="flex items-center gap-1 min-w-0 flex-1 min-h-[44px] cursor-pointer"
+          onClick={handleNameTap}
+          style={{ userSelect: 'none', WebkitTouchCallout: 'none' }}
+        >
           <span className="text-xs md:text-sm font-black text-white bg-black/30 px-1 md:px-1.5 rounded">#{player.number}</span>
           <span className="text-xs md:text-sm font-bold text-white truncate">{player.name}</span>
         </div>
-        <button
-          onClick={() => onStartEditing(player)}
-          className="p-0.5 ml-1 flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
-        >
-          <Edit3 className="w-3 h-3 md:w-4 md:h-4 text-slate-400" />
-        </button>
       </div>
 
-      {isFouledOut && <div className="bg-red-500 text-white text-center py-0.5 rounded mb-1 text-xs md:text-sm font-bold">{t.out}</div>}
+      {isFouledOut && <div className="bg-rose-500 text-white text-center py-0.5 rounded mb-1 text-xs md:text-sm font-bold">{t.out}</div>}
 
+      {/* Points: large prominent display */}
+      <div className="bg-orange-500/20 border border-orange-400/40 rounded px-2 py-1.5 md:py-2 mb-1 md:mb-1.5 text-center">
+        <div className="text-2xl md:text-3xl font-black text-orange-300 tabular-nums">{player.points}</div>
+        <div className="text-[10px] md:text-xs text-orange-300/70 font-bold uppercase tracking-wider">{t.pts}</div>
+      </div>
+
+      {/* Shooting breakdown: Points vs Missed */}
+      {hasShotData && (
+        <div className="flex gap-1 mb-1 md:mb-1.5">
+          <div className="flex-1 bg-emerald-500/15 border border-emerald-500/30 rounded px-1 py-1 text-center">
+            <div className="text-xs md:text-sm font-black text-emerald-400 tabular-nums">{player.points}</div>
+            <div className="text-[10px] text-emerald-400/70 font-bold">{t.ptsLabel}</div>
+          </div>
+          <div className="flex-1 bg-rose-500/15 border border-rose-500/30 rounded px-1 py-1 text-center">
+            <div className="text-xs md:text-sm font-black text-rose-400 tabular-nums">{player.missedShots || 0}</div>
+            <div className="text-[10px] text-rose-400/70 font-bold">{t.missedLabel}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Stint time + Fouls row */}
       <div className="flex gap-1 mb-1 md:mb-1.5">
         <div className="flex-1 bg-black/30 rounded px-1 py-1 md:py-1.5 text-center min-w-0">
           <div className="text-sm sm:text-base md:text-lg font-black text-white tabular-nums">{formatTime(player.currentMinutes)}</div>
+          <div className="text-[10px] text-slate-500 font-bold">{t.stint}</div>
         </div>
         <div className="relative">
           <div
             onClick={toggleFoulEditor}
-            className={`${foulBgClass} rounded px-2 md:px-3 py-1 md:py-1.5 flex items-center justify-center min-w-[32px] md:min-w-[40px] cursor-pointer active:opacity-70 transition-opacity`}
+            className={`${foulBgClass} rounded px-2 md:px-3 py-1 md:py-1.5 flex flex-col items-center justify-center min-w-[40px] md:min-w-[48px] cursor-pointer active:opacity-70 transition-opacity h-full`}
           >
-            <span className="text-sm sm:text-base md:text-lg font-black text-white">{player.fouls}</span>
+            <span className="text-sm sm:text-base md:text-lg font-black text-white">{player.fouls}<span className="text-xs font-bold text-white/60">/5</span></span>
+            <div className="flex gap-0.5 mt-0.5">
+              {renderFoulDots()}
+            </div>
           </div>
 
           {/* Popover de faltas +/- */}
@@ -229,13 +302,13 @@ const PlayerCard = memo(({
                 <button
                   onClick={() => handleFoulAdjust(-1)}
                   disabled={player.fouls <= 0}
-                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-red-600 active:bg-red-500'}`}
+                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-rose-500 active:bg-rose-400'}`}
                 >-</button>
                 <span className="text-lg font-black text-white w-6 text-center tabular-nums">{player.fouls}</span>
                 <button
                   onClick={() => handleFoulAdjust(1)}
                   disabled={player.fouls >= 5}
-                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-600 active:bg-emerald-500'}`}
+                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-500 active:bg-emerald-400'}`}
                 >+</button>
               </div>
             </>
@@ -243,25 +316,23 @@ const PlayerCard = memo(({
         </div>
       </div>
 
+      {/* Court time + Bench time row */}
       <div className="flex gap-1 mb-1 md:mb-1.5">
         <div className="flex-1 bg-black/20 rounded px-1 py-1 md:py-1.5 text-center min-w-0">
-          <div className="text-sm leading-none mb-0.5">🏀</div>
           <div className="text-xs md:text-sm font-bold text-slate-300 tabular-nums">{formatTime(player.totalCourtTime)}</div>
+          <div className="text-[10px] text-slate-500 font-bold">{t.court}</div>
         </div>
         <div className="flex-1 bg-black/20 rounded px-1 py-1 md:py-1.5 text-center min-w-0">
-          <div className="text-sm leading-none mb-0.5">💺</div>
           <div className="text-xs md:text-sm font-bold text-slate-300 tabular-nums">{formatTime(player.totalBenchTime)}</div>
+          <div className="text-[10px] text-slate-500 font-bold">{t.benchLabel}</div>
         </div>
       </div>
 
-      <div className="bg-orange-600/50 border border-orange-400 rounded px-1 py-0.5 md:py-1 mb-1 md:mb-1.5 text-center">
-        <span className="text-xs md:text-sm font-bold text-orange-200">{player.points} {t.pts}</span>
-      </div>
-
+      {/* IN/OUT button */}
       <button
         onClick={() => onToggleCourt(player.id)}
         disabled={isFouledOut || isUnselected || (isRosterView && player.onCourt)}
-        className={`w-full min-h-[44px] rounded-lg font-bold text-xs md:text-sm ${isFouledOut || isUnselected || (isRosterView && player.onCourt) ? 'bg-slate-600 opacity-50' : player.onCourt ? 'bg-orange-600 active:bg-orange-500' : 'bg-emerald-600 active:bg-emerald-500'}`}
+        className={`w-full min-h-[44px] rounded-lg font-bold text-xs md:text-sm ${isFouledOut || isUnselected || (isRosterView && player.onCourt) ? 'bg-slate-600 opacity-50' : player.onCourt ? 'bg-rose-500 active:bg-rose-400' : 'bg-emerald-500 active:bg-emerald-400'}`}
       >
         {isUnselected ? t.na : player.onCourt ? t.outBtn : t.inBtn}
       </button>

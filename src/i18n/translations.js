@@ -203,6 +203,38 @@ export const translations = {
     cancelBtn: 'Cancel',
     processing: 'Processing...',
 
+    // Scoring flow
+    whosShooting: "Who's shooting?",
+    freeThrows: 'Free throws',
+    howManyFT: 'How many free throws?',
+    howManyMade: 'How many made?',
+
+    // Player card (extra)
+    stint: 'STINT',
+    court: 'COURT',
+    benchLabel: 'BENCH',
+    shotBreakdown: 'Shots',
+    minutesPlayed: 'Min played',
+    doubleTapToEdit: 'Double-tap name to edit',
+    ptsLabel: 'PTS',
+    missedLabel: 'MISSED',
+    eff: 'EFF',
+
+    // Game management
+    phase: 'Phase',
+    matchday: 'Matchday',
+    editGame: 'Edit Game',
+    dateAndTime: 'Date & Time',
+    phasePlaceholder: 'Groups, Playoffs...',
+    saveChanges: 'Save changes',
+    inProgressGames: 'In Progress',
+    completedGames: 'Completed',
+    noInProgressGames: 'No games in progress',
+    noCompletedGames: 'No completed games yet',
+
+    // Sub recommendations (extra)
+    moreOptions: 'Options',
+
     // Defaults
     homeDefault: 'Home',
     awayDefault: 'Away',
@@ -409,6 +441,38 @@ export const translations = {
     resetImage: 'Reset',
     cancelBtn: 'Cancelar',
     processing: 'Procesando...',
+
+    // Scoring flow
+    whosShooting: '¿Quién tira?',
+    freeThrows: 'Tiros libres',
+    howManyFT: '¿Cuántos tiros libres?',
+    howManyMade: '¿Cuántos metió?',
+
+    // Player card (extra)
+    stint: 'STINT',
+    court: 'PISTA',
+    benchLabel: 'BANQ.',
+    shotBreakdown: 'Tiros',
+    minutesPlayed: 'Min jugados',
+    doubleTapToEdit: 'Doble toque en nombre para editar',
+    ptsLabel: 'PTS',
+    missedLabel: 'FALL.',
+    eff: 'EFI',
+
+    // Game management
+    phase: 'Fase',
+    matchday: 'Jornada',
+    editGame: 'Editar partido',
+    dateAndTime: 'Fecha y hora',
+    phasePlaceholder: 'Grupos, Playoffs...',
+    saveChanges: 'Guardar cambios',
+    inProgressGames: 'En curso',
+    completedGames: 'Finalizados',
+    noInProgressGames: 'No hay partidos en curso',
+    noCompletedGames: 'No hay partidos finalizados',
+
+    // Sub recommendations (extra)
+    moreOptions: 'Opciones',
 
     // Defaults
     homeDefault: 'Local',

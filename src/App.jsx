@@ -172,6 +172,7 @@ function AppContent() {
         onGameSaved={handleGameSaved}
         teamId={currentTeam?.id}
         userId={user?.id}
+        teamName={currentTeam?.name}
         showExitConfirm={showExitConfirm}
         onDismissExitConfirm={() => setShowExitConfirm(false)}
       />
