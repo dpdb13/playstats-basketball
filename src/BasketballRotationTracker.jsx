@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Undo2, RefreshCw, Bell, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
 import PlayStatsIcon from './components/PlayStatsIcon';
 import { addToQueue } from './lib/syncManager';
-import { formatTime, formatGameTime, getFoulStatus, getFoulBgClass, getQuintetKey, createInitialPlayerState, createInitialPartialScores } from './lib/gameUtils';
+import { formatTime, formatGameTime, getFoulStatus, getFoulBgClass, getQuintetKey, createInitialPlayerState, createInitialPartialScores, TEAM_COLORS, getTeamColor } from './lib/gameUtils';
 import { generateReport as generateReportHTML } from './lib/generateReport';
 import PlayerCard from './components/PlayerCard';
 import { useTranslation } from './context/LanguageContext';
@@ -66,6 +66,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   // Equipos y marcador
   const [homeTeam, setHomeTeam] = useState(() => savedGameData?.homeTeam || 'Home');
   const [awayTeam, setAwayTeam] = useState(() => savedGameData?.awayTeam || 'Away');
+  const [ourTeamColorId, setOurTeamColorId] = useState(() => savedGameData?.ourTeamColorId || 'orange');
+  const [rivalTeamColorId, setRivalTeamColorId] = useState(() => savedGameData?.rivalTeamColorId || 'sky');
   const [homeScore, setHomeScore] = useState(() => savedGameData?.homeScore ?? 0);
   const [awayScore, setAwayScore] = useState(() => savedGameData?.awayScore ?? 0);
 
@@ -93,6 +95,16 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const [showFouls, setShowFouls] = useState(false);
   const [freeThrowCount, setFreeThrowCount] = useState(null);
   const [expandedCrossPosition, setExpandedCrossPosition] = useState({});
+
+  // Game setup flow states
+  const [setupStep, setSetupStep] = useState(1); // 1=home/away, 2=our color, 3=rival name, 4=rival color
+  const [setupIsHome, setSetupIsHome] = useState(null);
+  const [setupOurColor, setSetupOurColor] = useState('orange');
+  const [setupRivalColor, setSetupRivalColor] = useState('sky');
+  const [setupRivalName, setSetupRivalName] = useState('');
+
+  // Rival scoring step
+  const [rivalScoringStep, setRivalScoringStep] = useState(null); // null or 'madeMissed'
 
   // Show exit modal when back button/gesture triggers from App
   useEffect(() => {
@@ -156,6 +168,81 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         currentQuarter: 1,
         homeTeam: resolvedHomeTeam,
         awayTeam: resolvedAwayTeam,
+        ourTeamColorId: 'orange',
+        rivalTeamColorId: 'sky',
+        homeScore: 0,
+        awayScore: 0,
+        rotationHistory: [],
+        actionHistory: [],
+        quintetHistory: [],
+        currentQuintet: null,
+        substitutionsByQuarter: { 1: 0, 2: 0, 3: 0, 4: 0 },
+        scoresByQuarter: { 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } },
+        leadChanges: 0,
+        ties: 0,
+        biggestLead: { us: 0, them: 0 },
+        partialScores: createInitialPartialScores(),
+        eventLog: [],
+        version: 2,
+        status: 'in_progress',
+        savedAt: Date.now()
+      };
+      onGameSaved(initialState).catch(err => console.error('Error saving new game to Supabase:', err));
+    }
+  }, [effectivePlayers, onGameSaved, t, teamName]);
+
+  const createNewGameWithColors = useCallback((isHome, ourColorId, rivalColorId, ourName, rivalName) => {
+    const newId = generateGameId();
+
+    setCurrentGameId(newId);
+    setGameStarted(true);
+    setIsHomeTeam(isHome);
+    setPlayers(effectivePlayers.map(createInitialPlayerState));
+    setGameRunning(false);
+    setGameTime(600);
+    setCurrentQuarter(1);
+
+    const resolvedHomeTeam = isHome ? ourName : rivalName;
+    const resolvedAwayTeam = isHome ? rivalName : ourName;
+    setHomeTeam(resolvedHomeTeam);
+    setAwayTeam(resolvedAwayTeam);
+    setOurTeamColorId(ourColorId);
+    setRivalTeamColorId(rivalColorId);
+    setHomeScore(0);
+    setAwayScore(0);
+    setRotationHistory([]);
+    setActionHistory([]);
+    setQuintetHistory([]);
+    setCurrentQuintet(null);
+    setSubstitutionsByQuarter({ 1: 0, 2: 0, 3: 0, 4: 0 });
+    setScoresByQuarter({ 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } });
+    setLeadChanges(0);
+    setTies(0);
+    setBiggestLead({ us: 0, them: 0 });
+    setPartialScores(createInitialPartialScores());
+    setEventLog([]);
+    // Reset setup state
+    setSetupStep(1);
+    setSetupIsHome(null);
+    setSetupOurColor('orange');
+    setSetupRivalColor('sky');
+    setSetupRivalName('');
+
+    setCurrentScreen('game');
+
+    if (onGameSaved) {
+      const initialState = {
+        id: newId,
+        gameStarted: true,
+        isHomeTeam: isHome,
+        players: effectivePlayers.map(createInitialPlayerState),
+        gameRunning: false,
+        gameTime: 600,
+        currentQuarter: 1,
+        homeTeam: resolvedHomeTeam,
+        awayTeam: resolvedAwayTeam,
+        ourTeamColorId: ourColorId,
+        rivalTeamColorId: rivalColorId,
         homeScore: 0,
         awayScore: 0,
         rotationHistory: [],
@@ -191,6 +278,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     benchIntervals,
     homeTeam,
     awayTeam,
+    ourTeamColorId,
+    rivalTeamColorId,
     homeScore,
     awayScore,
     rotationHistory,
@@ -207,7 +296,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     savedAt: Date.now()
   }), [
     currentGameId, gameStarted, isHomeTeam, players, gameTime, currentQuarter,
-    intervals, benchIntervals, homeTeam, awayTeam, homeScore, awayScore,
+    intervals, benchIntervals, homeTeam, awayTeam, ourTeamColorId, rivalTeamColorId,
+    homeScore, awayScore,
     rotationHistory, actionHistory, quintetHistory, currentQuintet,
     substitutionsByQuarter, scoresByQuarter, leadChanges, ties, biggestLead, partialScores,
     eventLog
@@ -921,8 +1011,19 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         if (isHomeTeam) setHomeScore(prev => prev - lastAction.points);
         else setAwayScore(prev => prev - lastAction.points);
         if (lastAction.playerId) {
+          const shotKey = `pts${lastAction.points}`;
           setPlayers(prev => prev.map(p =>
-            p.id === lastAction.playerId ? { ...p, points: p.points - lastAction.points } : p
+            p.id === lastAction.playerId ? {
+              ...p,
+              points: p.points - lastAction.points,
+              shotStats: {
+                ...p.shotStats,
+                [shotKey]: {
+                  ...p.shotStats?.[shotKey],
+                  made: Math.max(0, (p.shotStats?.[shotKey]?.made || 0) - 1)
+                }
+              }
+            } : p
           ));
         }
         setScoresByQuarter(prev => ({
@@ -986,8 +1087,21 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         [actionQuarter]: Math.max(0, prev[actionQuarter] - 2)
       }));
     } else if (lastAction.type === 'miss') {
+      const shotKey = lastAction.points ? `pts${lastAction.points}` : null;
       setPlayers(prev => prev.map(p =>
-        p.id === lastAction.playerId ? { ...p, missedShots: Math.max(0, (p.missedShots || 0) - 1) } : p
+        p.id === lastAction.playerId ? {
+          ...p,
+          missedShots: Math.max(0, (p.missedShots || 0) - 1),
+          ...(shotKey ? {
+            shotStats: {
+              ...p.shotStats,
+              [shotKey]: {
+                ...p.shotStats?.[shotKey],
+                missed: Math.max(0, (p.shotStats?.[shotKey]?.missed || 0) - 1)
+              }
+            }
+          } : {})
+        } : p
       ));
       setEventLog(prev => prev.slice(0, -1));
     } else if (lastAction.type === 'freeThrow') {
@@ -1004,10 +1118,21 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
           }
         }));
       }
-      // Undo player stats
+      // Undo player stats + shotStats.pts1
       setPlayers(prev => prev.map(p =>
         p.id === lastAction.playerId
-          ? { ...p, points: p.points - lastAction.madeCount, missedShots: Math.max(0, (p.missedShots || 0) - lastAction.missedCount) }
+          ? {
+              ...p,
+              points: p.points - lastAction.madeCount,
+              missedShots: Math.max(0, (p.missedShots || 0) - lastAction.missedCount),
+              shotStats: {
+                ...p.shotStats,
+                pts1: {
+                  made: Math.max(0, (p.shotStats?.pts1?.made || 0) - lastAction.madeCount),
+                  missed: Math.max(0, (p.shotStats?.pts1?.missed || 0) - lastAction.missedCount)
+                }
+              }
+            }
           : p
       ));
       // Remove all eventLog entries for this FT sequence (madeCount + missedCount entries)
@@ -1015,8 +1140,13 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       setEventLog(prev => prev.slice(0, -totalEvents));
     }
 
+    // Undo rival miss: just remove the eventLog entry
+    if (lastAction.type === 'rivalMiss') {
+      setEventLog(prev => prev.slice(0, -1));
+    }
+
     // Remove corresponding eventLog entry for score/foul actions
-    // Note: 'miss' and 'freeThrow' eventLog removal is handled in their own cases above
+    // Note: 'miss', 'freeThrow', and 'rivalMiss' eventLog removal is handled in their own cases above
     if (lastAction.type === 'score' || (lastAction.type === 'foul' && lastAction.delta > 0)) {
       setEventLog(prev => prev.slice(0, -1));
     }
@@ -1071,6 +1201,23 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setBiggestLead({ us: 0, them: 0 });
     setPartialScores(createInitialPartialScores());
     setEventLog([]);
+    // Reset UI states
+    setCourtExpanded(false);
+    setBenchExpanded(false);
+    setShowFouls(false);
+    setFreeThrowCount(null);
+    setExpandedCrossPosition({});
+    setRivalScoringStep(null);
+    setSelectedPoints(null);
+    setSelectedScorePlayer(null);
+    setPendingReplacement(null);
+    setCourtWarning(null);
+    // Reset setup wizard
+    setSetupStep(1);
+    setSetupIsHome(null);
+    setSetupOurColor('orange');
+    setSetupRivalColor('sky');
+    setSetupRivalName('');
 
     // Volver
     setCurrentGameId(null);
@@ -1099,14 +1246,26 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       setActionHistory(prev => [...prev, {
         type: 'miss',
         playerId,
+        points: selectedPoints,
         quarter: currentQuarter
       }]);
       setPlayers(prev => prev.map(p =>
-        p.id === playerId ? { ...p, missedShots: (p.missedShots || 0) + 1 } : p
+        p.id === playerId ? {
+          ...p,
+          missedShots: (p.missedShots || 0) + 1,
+          shotStats: {
+            ...p.shotStats,
+            [`pts${selectedPoints}`]: {
+              made: p.shotStats?.[`pts${selectedPoints}`]?.made || 0,
+              missed: (p.shotStats?.[`pts${selectedPoints}`]?.missed || 0) + 1
+            }
+          }
+        } : p
       ));
       setActiveModal(null);
       setSelectedPoints(null);
       setSelectedScorePlayer(null);
+      setRivalScoringStep(null);
       return;
     }
 
@@ -1134,7 +1293,17 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       lineupOnCourt: players.filter(p => p.onCourt).map(p => p.id)
     }]);
     setPlayers(prev => prev.map(p =>
-      p.id === playerId ? { ...p, points: p.points + selectedPoints } : p
+      p.id === playerId ? {
+        ...p,
+        points: p.points + selectedPoints,
+        shotStats: {
+          ...p.shotStats,
+          [`pts${selectedPoints}`]: {
+            made: (p.shotStats?.[`pts${selectedPoints}`]?.made || 0) + 1,
+            missed: p.shotStats?.[`pts${selectedPoints}`]?.missed || 0
+          }
+        }
+      } : p
     ));
 
     if (isHomeTeam) setHomeScore(prev => prev + selectedPoints);
@@ -1150,6 +1319,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setActiveModal(null);
     setSelectedPoints(null);
     setSelectedScorePlayer(null);
+    setRivalScoringStep(null);
   }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter, gameTime, players]);
 
   const addRivalPoints = useCallback(() => {
@@ -1168,6 +1338,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       gameTime,
       quarter: currentQuarter,
       type: 'score',
+      subtype: 'made',
       team: isHomeTeam ? 'away' : 'home',
       playerId: null,
       assistById: null,
@@ -1189,7 +1360,32 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setActiveModal(null);
     setSelectedPoints(null);
     setSelectedScorePlayer(null);
+    setRivalScoringStep(null);
   }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter, gameTime, players]);
+
+  const addRivalMiss = useCallback(() => {
+    setEventLog(prev => [...prev, {
+      timestamp: Date.now(),
+      gameTime,
+      quarter: currentQuarter,
+      type: 'miss',
+      team: isHomeTeam ? 'away' : 'home',
+      playerId: null,
+      assistById: null,
+      value: selectedPoints,
+      playType: null,
+      lineupOnCourt: players.filter(p => p.onCourt).map(p => p.id)
+    }]);
+    setActionHistory(prev => [...prev, {
+      type: 'rivalMiss',
+      points: selectedPoints,
+      quarter: currentQuarter
+    }]);
+    setActiveModal(null);
+    setSelectedPoints(null);
+    setSelectedScorePlayer(null);
+    setRivalScoringStep(null);
+  }, [selectedPoints, isHomeTeam, currentQuarter, gameTime, players]);
 
   const addFreeThrows = useCallback((playerId, madeCount) => {
     const missedCount = freeThrowCount - madeCount;
@@ -1202,7 +1398,18 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       else setAwayScore(prev => prev + madeCount);
 
       setPlayers(prev => prev.map(p =>
-        p.id === playerId ? { ...p, points: p.points + madeCount, missedShots: (p.missedShots || 0) + missedCount } : p
+        p.id === playerId ? {
+          ...p,
+          points: p.points + madeCount,
+          missedShots: (p.missedShots || 0) + missedCount,
+          shotStats: {
+            ...p.shotStats,
+            pts1: {
+              made: (p.shotStats?.pts1?.made || 0) + madeCount,
+              missed: (p.shotStats?.pts1?.missed || 0) + missedCount
+            }
+          }
+        } : p
       ));
 
       setScoresByQuarter(prev => ({
@@ -1215,7 +1422,17 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     } else {
       // All missed
       setPlayers(prev => prev.map(p =>
-        p.id === playerId ? { ...p, missedShots: (p.missedShots || 0) + missedCount } : p
+        p.id === playerId ? {
+          ...p,
+          missedShots: (p.missedShots || 0) + missedCount,
+          shotStats: {
+            ...p.shotStats,
+            pts1: {
+              made: p.shotStats?.pts1?.made || 0,
+              missed: (p.shotStats?.pts1?.missed || 0) + missedCount
+            }
+          }
+        } : p
       ));
     }
 
@@ -1436,33 +1653,126 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         <div className="bg-slate-800 rounded-2xl p-6 sm:p-8 border-2 border-orange-500 max-w-md w-full">
           <div className="flex items-center justify-between mb-4">
             <button
-              onClick={() => onExit && onExit()}
+              onClick={() => {
+                if (setupStep > 1) {
+                  setSetupStep(setupStep - 1);
+                } else {
+                  onExit && onExit();
+                }
+              }}
               className="text-slate-400 hover:text-white flex items-center gap-2 min-h-[44px]"
             >
               {t.back}
             </button>
-            <button
-              onClick={toggleLanguage}
-              className="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-sm font-bold"
-            >
-              {language === 'en' ? 'ES' : 'EN'}
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">{t.step} {setupStep}/4</span>
+              <button
+                onClick={toggleLanguage}
+                className="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-sm font-bold"
+              >
+                {language === 'en' ? 'ES' : 'EN'}
+              </button>
+            </div>
           </div>
           <div className="flex items-center justify-center gap-2 mb-6">
             <PlayStatsIcon className="w-8 h-8 text-orange-500" />
             <h1 className="text-xl sm:text-2xl font-black text-orange-400">{t.newGame}</h1>
           </div>
-          <h2 className="text-lg font-bold text-center mb-6 text-slate-300">{t.teamPlaysAs}</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <button onClick={() => createNewGame(true)} className="bg-orange-500 hover:bg-orange-400 active:bg-orange-300 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-orange-300 min-h-[100px]">
-              <div className="text-3xl sm:text-4xl mb-2">🏠</div>
-              <div className="text-lg sm:text-xl">{t.home}</div>
-            </button>
-            <button onClick={() => createNewGame(false)} className="bg-sky-500 hover:bg-sky-400 active:bg-sky-300 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-sky-300 min-h-[100px]">
-              <div className="text-3xl sm:text-4xl mb-2">✈️</div>
-              <div className="text-lg sm:text-xl">{t.away}</div>
-            </button>
-          </div>
+
+          {/* Step 1: Home or Away */}
+          {setupStep === 1 && (
+            <>
+              <h2 className="text-lg font-bold text-center mb-6 text-slate-300">{t.teamPlaysAs}</h2>
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => { setSetupIsHome(true); setSetupStep(2); }} className="bg-orange-500 hover:bg-orange-400 active:bg-orange-300 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-orange-300 min-h-[100px]">
+                  <div className="text-3xl sm:text-4xl mb-2">🏠</div>
+                  <div className="text-lg sm:text-xl">{t.home}</div>
+                </button>
+                <button onClick={() => { setSetupIsHome(false); setSetupStep(2); }} className="bg-sky-500 hover:bg-sky-400 active:bg-sky-300 rounded-xl p-4 sm:p-6 font-black text-center border-2 border-sky-300 min-h-[100px]">
+                  <div className="text-3xl sm:text-4xl mb-2">✈️</div>
+                  <div className="text-lg sm:text-xl">{t.away}</div>
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Step 2: Our team color */}
+          {setupStep === 2 && (
+            <>
+              <h2 className="text-lg font-bold text-center mb-6 text-slate-300">{t.selectColor}</h2>
+              <div className="grid grid-cols-5 gap-3 mb-6">
+                {TEAM_COLORS.map(color => (
+                  <button
+                    key={color.id}
+                    onClick={() => setSetupOurColor(color.id)}
+                    className={`w-full aspect-square rounded-xl ${color.swatch} ${setupOurColor === color.id ? `ring-4 ${color.ring} scale-110` : 'ring-2 ring-slate-600 opacity-70 hover:opacity-100'} transition-all ${color.id === 'white' ? 'text-slate-800' : ''}`}
+                    title={t[color.label]}
+                  />
+                ))}
+              </div>
+              <button
+                onClick={() => setSetupStep(3)}
+                className="w-full min-h-[56px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-lg"
+              >
+                {t.ok}
+              </button>
+            </>
+          )}
+
+          {/* Step 3: Rival name */}
+          {setupStep === 3 && (
+            <>
+              <h2 className="text-lg font-bold text-center mb-6 text-slate-300">{t.rivalName}</h2>
+              <input
+                type="text"
+                value={setupRivalName}
+                onChange={(e) => setSetupRivalName(e.target.value)}
+                placeholder={setupIsHome ? t.awayDefault : t.homeDefault}
+                className="w-full bg-slate-900 text-white px-4 py-3 rounded-xl text-center text-lg font-bold mb-6 border-2 border-slate-600 focus:border-orange-500 outline-none"
+                autoFocus
+              />
+              <button
+                onClick={() => setSetupStep(4)}
+                className="w-full min-h-[56px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-lg"
+              >
+                {t.ok}
+              </button>
+            </>
+          )}
+
+          {/* Step 4: Rival color */}
+          {setupStep === 4 && (
+            <>
+              <h2 className="text-lg font-bold text-center mb-6 text-slate-300">{t.selectRivalColor}</h2>
+              <div className="grid grid-cols-5 gap-3 mb-6">
+                {TEAM_COLORS.filter(c => c.id !== setupOurColor).map(color => (
+                  <button
+                    key={color.id}
+                    onClick={() => setSetupRivalColor(color.id)}
+                    className={`w-full aspect-square rounded-xl ${color.swatch} ${setupRivalColor === color.id ? `ring-4 ${color.ring} scale-110` : 'ring-2 ring-slate-600 opacity-70 hover:opacity-100'} transition-all ${color.id === 'white' ? 'text-slate-800' : ''}`}
+                    title={t[color.label]}
+                  />
+                ))}
+              </div>
+              <button
+                onClick={() => {
+                  // If selected color got filtered out (was same as our color), pick first available
+                  const availableColors = TEAM_COLORS.filter(c => c.id !== setupOurColor);
+                  const finalRivalColor = availableColors.find(c => c.id === setupRivalColor) ? setupRivalColor : availableColors[0].id;
+
+                  // Determine team names
+                  const rivalName = setupRivalName.trim() || (setupIsHome ? t.awayDefault : t.homeDefault);
+                  const ourName = teamName || (setupIsHome ? t.homeDefault : t.awayDefault);
+
+                  // Create the game with colors
+                  createNewGameWithColors(setupIsHome, setupOurColor, finalRivalColor, ourName, rivalName);
+                }}
+                className="w-full min-h-[56px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-lg"
+              >
+                {t.startGame}
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -1493,6 +1803,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       teamPositions={teamPositions}
     />
   );
+
+  const ourColor = getTeamColor(ourTeamColorId);
+  const rivalColor = getTeamColor(rivalTeamColorId);
+  const homeColor = isHomeTeam ? ourColor : rivalColor;
+  const awayColor = isHomeTeam ? rivalColor : ourColor;
 
   const hasFoulWarnings = warningPlayers.length > 0 || dangerPlayers.length > 0;
 
@@ -1567,29 +1882,48 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       </div>
     )}
 
-    {/* Score modal — 2-step flow: select player → made/missed */}
+    {/* Score modal — 2-step flow: select player → made/missed (+ rival made/missed) */}
     {activeModal === 'score' && (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
         <div className="bg-slate-800 rounded-xl p-4 border-2 border-orange-500 max-w-sm w-full modal-content">
-          {!selectedScorePlayer ? (
+          {rivalScoringStep === 'madeMissed' ? (
+            // Rival Made/Missed step
+            <>
+              <h3 className="text-lg font-black mb-1 text-center" style={{color: rivalColor.id === 'white' ? '#94a3b8' : undefined}}>
+                <span className={rivalColor.text}>{rivalTeamName}</span>
+              </h3>
+              <p className="text-center text-slate-400 text-sm mb-4">{selectedPoints} {selectedPoints === 1 ? 'PT' : 'PTS'} — {t.rivalMadeOrMissed}</p>
+              <div className="flex gap-3 mb-3">
+                <button onClick={() => { addRivalPoints(); setRivalScoringStep(null); }} className="flex-1 min-h-[64px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-xl flex items-center justify-center gap-2">
+                  ✓ {t.made}
+                </button>
+                <button onClick={() => { addRivalMiss(); setRivalScoringStep(null); }} className="flex-1 min-h-[64px] bg-rose-500 active:bg-rose-400 rounded-xl font-black text-xl flex items-center justify-center gap-2">
+                  ✗ {t.missed}
+                </button>
+              </div>
+              <button onClick={() => setRivalScoringStep(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+            </>
+          ) : !selectedScorePlayer ? (
+            // Step 1: Select player or rival
             <>
               <h3 className="text-lg font-black mb-3 text-orange-400 text-center">{t.whosShooting} ({selectedPoints} {selectedPoints === 1 ? 'PT' : 'PTS'})</h3>
               <div className="mb-3">
                 <div className="text-xs font-bold text-orange-400 mb-1">{ourTeamName}</div>
                 <div className="grid grid-cols-2 gap-2">
                   {onCourtPlayers.map(player => (
-                    <button key={player.id} onClick={() => setSelectedScorePlayer({ id: player.id, name: player.name, number: player.number })} className="bg-orange-500 active:bg-orange-400 rounded-lg min-h-[48px] p-2 font-bold text-sm">
+                    <button key={player.id} onClick={() => setSelectedScorePlayer({ id: player.id, name: player.name, number: player.number })} className={`${ourColor.bg} active:opacity-80 rounded-lg min-h-[48px] p-2 font-bold text-sm ${ourColor.id === 'white' ? 'text-slate-800' : ''}`}>
                       #{player.number} {player.name}
                     </button>
                   ))}
                 </div>
               </div>
-              <button onClick={addRivalPoints} className="w-full min-h-[48px] bg-sky-500 active:bg-sky-400 rounded-lg font-bold mb-2">
+              <button onClick={() => setRivalScoringStep('madeMissed')} className={`w-full min-h-[48px] ${rivalColor.bg} active:opacity-80 rounded-lg font-bold mb-2 ${rivalColor.id === 'white' ? 'text-slate-800' : ''}`}>
                 +{selectedPoints} {rivalTeamName}
               </button>
-              <button onClick={() => { setActiveModal(null); setSelectedPoints(null); }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
+              <button onClick={() => { setActiveModal(null); setSelectedPoints(null); setRivalScoringStep(null); }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
             </>
           ) : (
+            // Step 2: Made/Missed for our player
             <>
               <h3 className="text-lg font-black mb-1 text-orange-400 text-center">#{selectedScorePlayer.number} {selectedScorePlayer.name}</h3>
               <p className="text-center text-slate-400 text-sm mb-4">{selectedPoints} {selectedPoints === 1 ? 'PT' : 'PTS'}</p>
@@ -1783,11 +2117,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
           <div className="bg-slate-800 rounded-lg p-2 sm:p-3 border border-slate-700">
             {/* Score */}
             <div className="grid grid-cols-3 gap-2 mb-2">
-              <div className={`${isHomeTeam ? 'bg-orange-800 border-orange-400' : 'bg-orange-900/50 border-orange-600'} border-2 rounded-lg p-2 text-center`}>
+              <div className={`${isHomeTeam ? `${homeColor.bgDark} ${homeColor.border}` : `${homeColor.bgDark}/50 ${homeColor.borderMuted}`} border-2 rounded-lg p-2 text-center`}>
                 {editingTeam === 'home' ? (
                   <input type="text" defaultValue={homeTeam} onBlur={(e) => { setHomeTeam(e.target.value || t.home); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeTeam(e.target.value || t.home); setEditingTeam(null); }}} className="bg-slate-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
                 ) : (
-                  <div className="text-xs sm:text-sm text-orange-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('home')}>{homeTeam}</div>
+                  <div className={`text-xs sm:text-sm ${homeColor.text} truncate cursor-pointer py-1`} onClick={() => setEditingTeam('home')}>{homeTeam}</div>
                 )}
                 {editingScore === 'home' ? (
                   <input type="number" min="0" defaultValue={homeScore} onBlur={(e) => { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />
@@ -1822,11 +2156,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                   </div>
                 )}
               </div>
-              <div className={`${!isHomeTeam ? 'bg-sky-800 border-sky-400' : 'bg-sky-900/50 border-sky-600'} border-2 rounded-lg p-2 text-center`}>
+              <div className={`${!isHomeTeam ? `${awayColor.bgDark} ${awayColor.border}` : `${awayColor.bgDark}/50 ${awayColor.borderMuted}`} border-2 rounded-lg p-2 text-center`}>
                 {editingTeam === 'away' ? (
                   <input type="text" defaultValue={awayTeam} onBlur={(e) => { setAwayTeam(e.target.value || t.away); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayTeam(e.target.value || t.away); setEditingTeam(null); }}} className="bg-slate-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
                 ) : (
-                  <div className="text-xs sm:text-sm text-sky-300 truncate cursor-pointer py-1" onClick={() => setEditingTeam('away')}>{awayTeam}</div>
+                  <div className={`text-xs sm:text-sm ${awayColor.text} truncate cursor-pointer py-1`} onClick={() => setEditingTeam('away')}>{awayTeam}</div>
                 )}
                 {editingScore === 'away' ? (
                   <input type="number" min="0" defaultValue={awayScore} onBlur={(e) => { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />

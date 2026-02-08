@@ -19,28 +19,34 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - **Lucide React** - iconos (Clock, Users, Play, etc.)
 
 ## Estado actual del código
-- **Componente principal:** `BasketballRotationTracker.jsx` (~1,710 líneas)
+- **Componente principal:** `BasketballRotationTracker.jsx` (~2,138 líneas)
 - **Archivos extraídos:**
-  - `src/lib/gameUtils.js` - funciones de utilidad (formatTime, getFoulStatus, etc.)
+  - `src/lib/gameUtils.js` - funciones de utilidad (formatTime, getFoulStatus, posiciones configurables, etc.)
   - `src/components/PlayerCard.jsx` - componente de tarjeta de jugador (con vista compacta y expandida)
   - `src/lib/generateReport.js` - generación de reportes HTML
-  - `src/i18n/translations.js` - traducciones EN/ES (~40+ keys)
+  - `src/i18n/translations.js` - traducciones EN/ES (~115+ keys)
   - `src/context/LanguageContext.jsx` - context + hook useTranslation()
-  - `src/hooks/useSwipeGesture.js` - detección de swipe horizontal
+  - `src/hooks/useSwipeGesture.js` - detección de swipe horizontal (ya no se usa en tracker, mantenido por si acaso)
 - **Guardado:** Solo Supabase (via `onGameSaved` + `syncManager`). El localStorage legacy fue eliminado.
-- **Modales:** Unificados en un solo `activeModal` useState (valores: null, 'exit', 'reset', 'quarter', 'intervals', 'score', 'foul', 'fouledOut')
+- **Modales:** Unificados en un solo `activeModal` useState (valores: null, 'exit', 'reset', 'quarter', 'intervals', 'score', 'foul', 'fouledOut', 'freeThrowCount', 'freeThrowPlayer') + `pendingReplacement` separado para modal de reemplazo
 - **PWA (Progressive Web App)** - Se puede instalar como app en móvil
 - **Desplegada en:** https://dpdb13.github.io/playstats-basketball/
 - **Nombre oficial:** PlayStats Basketball
 - **Service Worker:** Auto-actualización implementada (detecta nueva versión y recarga automáticamente)
-- **Cache actual:** `basketball-rotation-v23`
+- **Cache actual:** `basketball-rotation-v27`
 - **Manifest:** `orientation: "any"` (permite horizontal y vertical)
+- **History API:** pushState/popstate para navegación nativa de back en iOS/Android
+- **Supabase schema:** Columna `team_settings JSONB` en tabla `teams` para posiciones configurables
 
 ## Funcionalidades implementadas
 
 ### Gestión de jugadores
 - 12 jugadores predefinidos con nombre, número y posición
-- Posiciones: Base, Alero, Joker, Unselected (no convocado)
+- **Posiciones configurables:** cada equipo define sus posiciones en `team_settings.positions` (default: Base, Alero, Joker)
+  - Editor de posiciones en TeamDetail (solo owner): añadir, renombrar, eliminar posiciones
+  - Colores dinámicos por posición (8 colores predefinidos, rotan cíclicamente)
+  - `getTeamPositions(team)` en gameUtils.js como fuente única
+  - Supabase: `teams.team_settings JSONB DEFAULT '{}'`
 - **Posiciones secundarias:** cada jugador puede tener posiciones extra (ej: Joker que también juega de Alero)
   - Se configuran en el editor del equipo con botones toggle
   - Se guardan en Supabase como `secondary_positions text[]`
@@ -70,17 +76,33 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - Marcador con equipos editables
 - Parciales por cuarto (dividido en dos mitades de 5 min)
 - Puntos individuales de cada jugador
-- Botones +1, +2, +3 para anotar
+- Botones 3 PTS / 2 PTS / 1 PT con colores suaves
+- **Flujo made/missed:** seleccionar puntos → seleccionar jugador → ✓ MADE / ✗ MISSED
+  - MISSED no suma puntos pero registra en eventLog (type: 'miss') e incrementa `missedShots`
+  - MADE suma puntos y registra con subtype: 'made'
+  - Rival: flujo directo sin made/missed
 
 ### Recomendaciones de cambio
 - Detecta jugadores que llevan mucho tiempo en pista (rojo)
 - Detecta jugadores con problemas de faltas
+- **Split de recomendaciones:** misma posición se muestra directamente, cross-position en toggle colapsable con badge
 - Sugiere reemplazos de la misma posición
 - **Posiciones secundarias:** sugiere jugadores cuya `secondary_positions` incluya la posición necesaria
   - Guardia: solo sugiere si hay otro jugador de su posición primaria en banquillo sin problemas de faltas (el tiempo se ignora)
   - Texto dinámico: `⚠️ Joker→Alero` (o cualquier combinación)
   - Funciona tanto en recomendaciones normales como en el modal de fouled out
   - Ya no hay nombres hardcodeados (era `flexibleJokers = ['Jorge', 'Unai']`)
+
+### Modal de reemplazo
+- Al sacar un jugador con 5 en pista → modal "¿Quién entra?" con jugadores de banquillo
+- Ordenados: misma posición primero → posición secundaria → resto
+- Colores: verde (misma pos), azul (secundaria), gris (resto)
+- Botón SKIP para cerrar sin meter a nadie
+
+### Navegación
+- **History API:** pushState/popstate para back nativo en iOS/Android
+- En partido, gesto back muestra modal de salida (no navega directamente)
+- Swipe custom eliminado del tracker (conflicto con gestos nativos)
 
 ### Reportes
 - Genera HTML descargable con:
@@ -285,6 +307,96 @@ Cada evento vinculado al quinteto que estaba jugando → permite correlaciones p
 - Función `get_team_by_invite_code` existe en Supabase pero no está en `supabase-schema.sql` versionado
 
 ## Historial de conversaciones
+
+### 8 febrero 2026 - Sesión 14: Feature Batch v27 (11 features + QA)
+
+**4 agentes Opus en paralelo + 1 agente Opus QA adversarial:**
+- 11 features implementadas: FT flow, paleta naranja/sky, PlayerCard compacta+expandida, double-tap edit, per-section expand, sub recs per-player, team name auto-fill, game metadata editing, collapsible game sections, "Who's shooting?" text
+- QA encontró 7 issues (3 CRITICAL): INITIAL_PARTIAL_SCORES mutable, labels hardcodeados, shot % incorrecto, placeholder español, dead prop, fecha errónea en modal
+- Todos arreglados antes de deploy
+- 24 nuevas translation keys (EN/ES)
+- 6 archivos modificados, 722 insertions, 194 deletions
+- Cache v27, desplegado a GitHub Pages
+- Notion actualizado con Development Log
+
+**Paleta nueva:**
+- Home: azul oscuro → naranja marca (orange-500/800)
+- Away: rojo oscuro → azul cielo (sky-500/800)
+- 3PT: naranja → índigo (evitar conflicto con marca)
+- Todos los botones: -700 → -500 (más suaves)
+
+**Nuevos modales:** freeThrowCount, freeThrowPlayer
+**Nuevos estados:** courtExpanded, benchExpanded, freeThrowCount, expandedCrossPosition
+**Prop nuevo:** teamName (App→Tracker)
+
+---
+
+### 8 febrero 2026 - Sesión 13: Peer Review exhaustivo con Agent Teams Opus (28 fixes)
+
+**Agent Teams adversarial review (3 agentes Opus: qa-bugs, ux-i18n, code-quality):**
+- Revisión exhaustiva de 5,509 líneas en 21 archivos
+- 28 issues únicos encontrados: 5 CRITICAL, 11 MEDIUM, 12 LOW
+- Todos arreglados por 3 agentes Opus en paralelo + verificación post-fix por un 4º agente Opus
+
+**Fixes CRITICAL (5):**
+1. Banquillo dinámico por posiciones del equipo (no más Base/Alero/Joker hardcodeado)
+2. Dropdown de posiciones en PlayerCard dinámico (acepta prop `teamPositions`)
+3. Auth.jsx: i18n completo (20 strings) + gray→slate + green→emerald
+4. ShareTeamModal.jsx: i18n completo (5 strings) + gray→slate
+5. PlayerRosterEditor.jsx: layout 2 filas en móvil (fix del bug de nombres recortados)
+
+**Fixes MEDIUM (11):**
+- Undo de score/sustitución usa cuarto correcto (guardado en actionHistory)
+- Tiros fallados (MISSED) ahora se pueden deshacer
+- generateReport ya no mata el quinteto activo (cálculo inline)
+- Autosave usa ref (intervalo ya no se reinicia constantemente)
+- Modales no se solapan (pendingReplacement se limpia)
+- biggestLead usa update funcional (sin stale closure)
+- addPlayer cache usa prev pattern (sin referencia stale)
+- INITIAL_PARTIAL_SCORES ahora tiene función factory
+- ErrorBoundary añadido (evita pantalla blanca en crashes)
+- Paleta unificada: gray→slate, green→emerald, yellow→amber, cyan→blue (~15 sitios en 7 archivos)
+- ImageCropper.jsx: i18n completo (8 strings)
+
+**Fixes LOW (12):**
+- Undo sustitución con cuarto correcto
+- Timer auto-advance cierra/reabre quinteto
+- Touch targets ≥44px (Apple HIG) en PlayerCard, PlayerRosterEditor
+- XSS en generateReport (escapeHtml en nombres)
+- Home/Away usan traducciones
+- Console.errors en inglés
+- slate-750→slate-700 (Tailwind válido)
+- aria-labels pendientes (documentado, no implementado en esta sesión)
+- useSwipeGesture marcado como unused
+
+**Archivos modificados:** 15 (todos los .jsx/.js + sw.js)
+**translations.js:** +33 keys nuevas
+**Verificación post-fix:** agente Opus, 12/13 PASS a la primera, 1 fix adicional aplicado
+**Build:** exitoso, cache v24 → v25, desplegado a GitHub Pages
+**Decisión:** para tareas críticas (reviews, QA) SIEMPRE usar Opus
+
+---
+
+### 8 febrero 2026 - Sesión 12: Fase 2.5 Mejoras post-deploy (9 pasos)
+
+**Fase 2.5 completa (9/9 pasos):**
+1. **History API + back nativo:** pushState/popstate en App.jsx, swipe eliminado del tracker, gesto back en partido → modal de salida
+2. **i18n pantallas restantes:** TeamsList, TeamDetail, PlayerRosterEditor traducidos EN/ES (~90+ keys), bg-gray→bg-slate, selector idioma con banderas
+3. **Fixes visuales:** banquillo verde al inicio (jugadores sin historia), botones score suaves (3 PTS/2 PTS/1 PT), label "F" verificado
+4. **PlayerCard compacta enriquecida:** stint/total time + puntos + faltas en una línea
+5. **Foul section movida:** entre parciales y On Court, toggle colapsable con badge ⚠️ N
+6. **Recomendaciones split:** misma posición directas, cross-position en toggle colapsable morado
+7. **Score made/missed:** flujo 2 pasos (elige jugador → ✓ MADE / ✗ MISSED), missedShots en playerState, eventLog con type:'miss'
+8. **Modal de reemplazo:** al sacar jugador con 5 en pista → lista banquillo ordenada por posición (misma→secundaria→resto) + Skip
+9. **Posiciones configurables:** team_settings JSONB en Supabase, editor en TeamDetail, PlayerRosterEditor dinámico, colores por índice (8 colores cíclicos)
+
+**Archivos modificados:** App.jsx, BasketballRotationTracker.jsx, PlayerCard.jsx, TeamDetail.jsx, TeamsList.jsx, PlayerRosterEditor.jsx, translations.js, gameUtils.js, TeamContext.jsx
+**Archivo nuevo:** supabase-migration-team-settings.sql
+**SQL ejecutado:** `ALTER TABLE public.teams ADD COLUMN team_settings JSONB DEFAULT '{}'`
+**Code review:** subagente sonnet, 0 bugs críticos
+**Build:** exitoso, cache v23 → v24, desplegado a GitHub Pages
+
+---
 
 ### 8 febrero 2026 - Sesión 11: Fase 2 UI/UX Overhaul + Agent Teams Review + Deploy
 

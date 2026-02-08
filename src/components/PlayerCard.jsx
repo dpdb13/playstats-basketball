@@ -102,7 +102,7 @@ const PlayerCard = memo(({
     }
   };
 
-  // Foul dots for compact view
+  // Foul dots for expanded view
   const renderFoulDots = () => {
     const dots = [];
     for (let i = 0; i < 5; i++) {
@@ -198,9 +198,6 @@ const PlayerCard = memo(({
             className={`${foulBgClass} rounded px-1 py-0.5 cursor-pointer active:opacity-70 flex items-center gap-0.5`}
           >
             <span className="text-xs font-black text-white">{player.fouls}</span>
-            <div className="flex gap-px items-center">
-              {renderFoulDots()}
-            </div>
           </div>
           {showFoulEditor && (
             <>
@@ -238,9 +235,6 @@ const PlayerCard = memo(({
   // VISTA EXPANDIDA — tarjeta completa con stats
   // ============================================
 
-  // Shooting stats: points scored vs missed shots
-  const hasShotData = player.points > 0 || (player.missedShots || 0) > 0;
-
   return (
     <div className={`rounded-lg p-1.5 sm:p-2 md:p-3 border-3 ${borderClass} ${player.onCourt ? 'bg-slate-700' : isUnselected ? 'bg-slate-700 opacity-50' : 'bg-slate-800'} ${dimClass}`}>
       {/* Header: Number + Name (double-tap to edit) */}
@@ -263,69 +257,58 @@ const PlayerCard = memo(({
         <div className="text-[10px] md:text-xs text-orange-300/70 font-bold uppercase tracking-wider">{t.pts}</div>
       </div>
 
-      {/* Shooting breakdown: Points vs Missed */}
-      {hasShotData && (
-        <div className="flex gap-1 mb-1 md:mb-1.5">
-          <div className="flex-1 bg-emerald-500/15 border border-emerald-500/30 rounded px-1 py-1 text-center">
-            <div className="text-xs md:text-sm font-black text-emerald-400 tabular-nums">{player.points}</div>
-            <div className="text-[10px] text-emerald-400/70 font-bold">{t.ptsLabel}</div>
-          </div>
-          <div className="flex-1 bg-rose-500/15 border border-rose-500/30 rounded px-1 py-1 text-center">
-            <div className="text-xs md:text-sm font-black text-rose-400 tabular-nums">{player.missedShots || 0}</div>
-            <div className="text-[10px] text-rose-400/70 font-bold">{t.missedLabel}</div>
-          </div>
-        </div>
-      )}
-
-      {/* Stint time + Fouls row */}
+      {/* Shot breakdown: 3PT / 2PT / 1PT */}
       <div className="flex gap-1 mb-1 md:mb-1.5">
-        <div className="flex-1 bg-black/30 rounded px-1 py-1 md:py-1.5 text-center min-w-0">
-          <div className="text-sm sm:text-base md:text-lg font-black text-white tabular-nums">{formatTime(player.currentMinutes)}</div>
-          <div className="text-[10px] text-slate-500 font-bold">{t.stint}</div>
-        </div>
-        <div className="relative">
-          <div
-            onClick={toggleFoulEditor}
-            className={`${foulBgClass} rounded px-2 md:px-3 py-1 md:py-1.5 flex flex-col items-center justify-center min-w-[40px] md:min-w-[48px] cursor-pointer active:opacity-70 transition-opacity h-full`}
-          >
-            <span className="text-sm sm:text-base md:text-lg font-black text-white">{player.fouls}<span className="text-xs font-bold text-white/60">/5</span></span>
-            <div className="flex gap-0.5 mt-0.5">
-              {renderFoulDots()}
-            </div>
+        <div className="flex-1 bg-indigo-500/15 border border-indigo-500/30 rounded px-1 py-1 text-center">
+          <div className="text-xs md:text-sm font-black text-indigo-400 tabular-nums">
+            {player.shotStats?.pts3?.made || 0}/{(player.shotStats?.pts3?.made || 0) + (player.shotStats?.pts3?.missed || 0)}
           </div>
-
-          {/* Popover de faltas +/- */}
-          {showFoulEditor && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={closeFoulEditor} />
-              <div className="absolute right-0 bottom-full mb-1 z-50 bg-slate-800 border-2 border-orange-500 rounded-lg shadow-xl p-1.5 flex items-center gap-1.5">
-                <button
-                  onClick={() => handleFoulAdjust(-1)}
-                  disabled={player.fouls <= 0}
-                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-rose-500 active:bg-rose-400'}`}
-                >-</button>
-                <span className="text-lg font-black text-white w-6 text-center tabular-nums">{player.fouls}</span>
-                <button
-                  onClick={() => handleFoulAdjust(1)}
-                  disabled={player.fouls >= 5}
-                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-500 active:bg-emerald-400'}`}
-                >+</button>
-              </div>
-            </>
-          )}
+          <div className="text-[10px] text-indigo-400/70 font-bold">{t.threePt}</div>
+        </div>
+        <div className="flex-1 bg-blue-500/15 border border-blue-500/30 rounded px-1 py-1 text-center">
+          <div className="text-xs md:text-sm font-black text-blue-400 tabular-nums">
+            {player.shotStats?.pts2?.made || 0}/{(player.shotStats?.pts2?.made || 0) + (player.shotStats?.pts2?.missed || 0)}
+          </div>
+          <div className="text-[10px] text-blue-400/70 font-bold">{t.twoPt}</div>
+        </div>
+        <div className="flex-1 bg-emerald-500/15 border border-emerald-500/30 rounded px-1 py-1 text-center">
+          <div className="text-xs md:text-sm font-black text-emerald-400 tabular-nums">
+            {player.shotStats?.pts1?.made || 0}/{(player.shotStats?.pts1?.made || 0) + (player.shotStats?.pts1?.missed || 0)}
+          </div>
+          <div className="text-[10px] text-emerald-400/70 font-bold">{t.onePt}</div>
         </div>
       </div>
 
-      {/* Court time + Bench time row */}
-      <div className="flex gap-1 mb-1 md:mb-1.5">
-        <div className="flex-1 bg-black/20 rounded px-1 py-1 md:py-1.5 text-center min-w-0">
-          <div className="text-xs md:text-sm font-bold text-slate-300 tabular-nums">{formatTime(player.totalCourtTime)}</div>
-          <div className="text-[10px] text-slate-500 font-bold">{t.court}</div>
+      {/* Fouls row */}
+      <div className="relative mb-1 md:mb-1.5">
+        <div
+          onClick={toggleFoulEditor}
+          className={`${foulBgClass} rounded px-2 md:px-3 py-1.5 md:py-2 flex items-center justify-center gap-2 cursor-pointer active:opacity-70 transition-opacity`}
+        >
+          <span className="text-sm sm:text-base md:text-lg font-black text-white">{player.fouls}<span className="text-xs font-bold text-white/60">/5</span></span>
+          <div className="flex gap-0.5">
+            {renderFoulDots()}
+          </div>
         </div>
-        <div className="flex-1 bg-black/20 rounded px-1 py-1 md:py-1.5 text-center min-w-0">
-          <div className="text-xs md:text-sm font-bold text-slate-300 tabular-nums">{formatTime(player.totalBenchTime)}</div>
-          <div className="text-[10px] text-slate-500 font-bold">{t.benchLabel}</div>
-        </div>
+        {/* Popover de faltas +/- */}
+        {showFoulEditor && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={closeFoulEditor} />
+            <div className="absolute right-0 bottom-full mb-1 z-50 bg-slate-800 border-2 border-orange-500 rounded-lg shadow-xl p-1.5 flex items-center gap-1.5">
+              <button
+                onClick={() => handleFoulAdjust(-1)}
+                disabled={player.fouls <= 0}
+                className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-rose-500 active:bg-rose-400'}`}
+              >-</button>
+              <span className="text-lg font-black text-white w-6 text-center tabular-nums">{player.fouls}</span>
+              <button
+                onClick={() => handleFoulAdjust(1)}
+                disabled={player.fouls >= 5}
+                className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-500 active:bg-emerald-400'}`}
+              >+</button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* IN/OUT button */}

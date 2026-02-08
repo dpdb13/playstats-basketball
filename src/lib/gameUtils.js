@@ -12,6 +12,24 @@ export const createInitialPartialScores = () => ({
 // Backward compatibility — prefer createInitialPartialScores() for fresh objects
 export const INITIAL_PARTIAL_SCORES = createInitialPartialScores();
 
+// ============================================
+// COLORES DE EQUIPO
+// ============================================
+export const TEAM_COLORS = [
+  { id: 'orange', label: 'colorOrange', bg: 'bg-orange-500', bgDark: 'bg-orange-800', border: 'border-orange-400', borderMuted: 'border-orange-600', text: 'text-orange-300', ring: 'ring-orange-400', swatch: 'bg-orange-500' },
+  { id: 'sky', label: 'colorBlue', bg: 'bg-sky-500', bgDark: 'bg-sky-800', border: 'border-sky-400', borderMuted: 'border-sky-600', text: 'text-sky-300', ring: 'ring-sky-400', swatch: 'bg-sky-500' },
+  { id: 'red', label: 'colorRed', bg: 'bg-red-500', bgDark: 'bg-red-800', border: 'border-red-400', borderMuted: 'border-red-600', text: 'text-red-300', ring: 'ring-red-400', swatch: 'bg-red-500' },
+  { id: 'emerald', label: 'colorGreen', bg: 'bg-emerald-500', bgDark: 'bg-emerald-800', border: 'border-emerald-400', borderMuted: 'border-emerald-600', text: 'text-emerald-300', ring: 'ring-emerald-400', swatch: 'bg-emerald-500' },
+  { id: 'purple', label: 'colorPurple', bg: 'bg-purple-500', bgDark: 'bg-purple-800', border: 'border-purple-400', borderMuted: 'border-purple-600', text: 'text-purple-300', ring: 'ring-purple-400', swatch: 'bg-purple-500' },
+  { id: 'pink', label: 'colorPink', bg: 'bg-pink-500', bgDark: 'bg-pink-800', border: 'border-pink-400', borderMuted: 'border-pink-600', text: 'text-pink-300', ring: 'ring-pink-400', swatch: 'bg-pink-500' },
+  { id: 'amber', label: 'colorYellow', bg: 'bg-amber-500', bgDark: 'bg-amber-800', border: 'border-amber-400', borderMuted: 'border-amber-600', text: 'text-amber-300', ring: 'ring-amber-400', swatch: 'bg-amber-500' },
+  { id: 'slate', label: 'colorBlack', bg: 'bg-slate-500', bgDark: 'bg-slate-800', border: 'border-slate-400', borderMuted: 'border-slate-600', text: 'text-slate-300', ring: 'ring-slate-400', swatch: 'bg-slate-600' },
+  { id: 'white', label: 'colorWhite', bg: 'bg-white', bgDark: 'bg-slate-200', border: 'border-white', borderMuted: 'border-slate-300', text: 'text-slate-800', ring: 'ring-white', swatch: 'bg-white' },
+  { id: 'gray', label: 'colorGray', bg: 'bg-gray-500', bgDark: 'bg-gray-700', border: 'border-gray-400', borderMuted: 'border-gray-600', text: 'text-gray-300', ring: 'ring-gray-400', swatch: 'bg-gray-500' },
+];
+
+export const getTeamColor = (colorId) => TEAM_COLORS.find(c => c.id === colorId) || TEAM_COLORS[0];
+
 export const createInitialPlayerState = (player) => ({
   ...player,
   secondary_positions: player.secondary_positions || [],
@@ -22,6 +40,7 @@ export const createInitialPlayerState = (player) => ({
   fouls: 0,
   points: 0,
   missedShots: 0,
+  shotStats: { pts3: { made: 0, missed: 0 }, pts2: { made: 0, missed: 0 }, pts1: { made: 0, missed: 0 } },
   lastToggle: null,
   stints: [],
   stintPlusMinus: [],

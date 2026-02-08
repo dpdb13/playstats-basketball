@@ -240,6 +240,34 @@ export const translations = {
     awayDefault: 'Away',
     unassigned: 'UNASSIGNED',
     dragToMove: 'Drag to move. Use slider to zoom.',
+
+    // Color picker
+    selectColor: 'Select your team color',
+    selectRivalColor: 'Select rival color',
+    rivalName: 'Rival name (optional)',
+    startGame: 'START GAME',
+    step: 'Step',
+
+    // Shot stats
+    threePt: '3PT',
+    twoPt: '2PT',
+    onePt: '1PT',
+    foulsLabel: 'FOULS',
+
+    // Rival scoring
+    rivalMadeOrMissed: 'Made or missed?',
+
+    // Color names
+    colorRed: 'Red',
+    colorBlue: 'Blue',
+    colorGreen: 'Green',
+    colorPurple: 'Purple',
+    colorOrange: 'Orange',
+    colorPink: 'Pink',
+    colorYellow: 'Yellow',
+    colorBlack: 'Black',
+    colorWhite: 'White',
+    colorGray: 'Gray',
   },
 
   es: {
@@ -479,5 +507,33 @@ export const translations = {
     awayDefault: 'Visitante',
     unassigned: 'SIN ASIGNAR',
     dragToMove: 'Arrastra para mover. Usa el slider para hacer zoom.',
+
+    // Color picker
+    selectColor: 'Elige el color de tu equipo',
+    selectRivalColor: 'Elige el color del rival',
+    rivalName: 'Nombre del rival (opcional)',
+    startGame: 'EMPEZAR PARTIDO',
+    step: 'Paso',
+
+    // Shot stats
+    threePt: '3PT',
+    twoPt: '2PT',
+    onePt: '1PT',
+    foulsLabel: 'FALTAS',
+
+    // Rival scoring
+    rivalMadeOrMissed: '¿Metió o falló?',
+
+    // Color names
+    colorRed: 'Rojo',
+    colorBlue: 'Azul',
+    colorGreen: 'Verde',
+    colorPurple: 'Morado',
+    colorOrange: 'Naranja',
+    colorPink: 'Rosa',
+    colorYellow: 'Amarillo',
+    colorBlack: 'Negro',
+    colorWhite: 'Blanco',
+    colorGray: 'Gris',
   }
 };
