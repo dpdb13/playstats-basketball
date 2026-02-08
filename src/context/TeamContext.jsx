@@ -7,6 +7,7 @@ import {
   getCachedGames, setCachedGames,
   addToQueue, processQueue, startSyncListener, isOnline
 } from '../lib/syncManager';
+import { DEFAULT_POSITIONS } from '../lib/gameUtils';
 
 const TeamContext = createContext({});
 
@@ -89,13 +90,14 @@ export function TeamProvider({ children }) {
   }, [loadTeams]);
 
   // Crear equipo
-  const createTeam = useCallback(async (name, icon = '🏀') => {
+  const createTeam = useCallback(async (name, icon = '🏀', positions = null) => {
     if (!user) return null;
 
     try {
+      const teamSettings = positions ? { positions } : {};
       const { data: team, error: teamError } = await supabase
         .from('teams')
-        .insert({ name, icon, created_by: user.id })
+        .insert({ name, icon, created_by: user.id, team_settings: teamSettings })
         .select()
         .single();
 
@@ -108,12 +110,13 @@ export function TeamProvider({ children }) {
 
       if (memberError) throw memberError;
 
-      // Crear jugadores por defecto
-      const playersToInsert = DEFAULT_PLAYERS.map((p, i) => ({
+      // Crear jugadores por defecto, distribuidos entre las posiciones elegidas
+      const effectivePositions = positions || DEFAULT_POSITIONS;
+      const playersToInsert = Array.from({ length: 12 }, (_, i) => ({
         team_id: team.id,
-        name: p.name,
-        number: p.number,
-        position: p.position,
+        name: `Player ${i + 1}`,
+        number: String(i === 11 ? 0 : i + 1),
+        position: i < 11 ? effectivePositions[i % effectivePositions.length] : 'Unselected',
         sort_order: i
       }));
 

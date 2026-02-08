@@ -1487,6 +1487,15 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setFreeThrowCount(null);
   }, [freeThrowCount, getCurrentScores, updateGameFlow, isHomeTeam, currentQuarter, gameTime, players]);
 
+  // Cancel all scoring flow (resets every scoring-related state)
+  const cancelScoring = useCallback(() => {
+    setActiveModal(null);
+    setSelectedPoints(null);
+    setSelectedScorePlayer(null);
+    setFreeThrowCount(null);
+    setRivalScoringStep(null);
+  }, []);
+
   const executeSub = useCallback((outId, inId) => {
     const outPlayer = players.find(p => p.id === outId);
     const inPlayer = players.find(p => p.id === inId);
@@ -1901,7 +1910,10 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                   ✗ {t.missed}
                 </button>
               </div>
-              <button onClick={() => setRivalScoringStep(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+              <div className="flex gap-2">
+                <button onClick={() => setRivalScoringStep(null)} className="flex-1 min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+                <button onClick={cancelScoring} className="flex-1 min-h-[44px] bg-slate-700 rounded-lg font-bold text-slate-400">{t.cancel}</button>
+              </div>
             </>
           ) : !selectedScorePlayer ? (
             // Step 1: Select player or rival
@@ -1935,71 +1947,82 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                   ✗ {t.missed}
                 </button>
               </div>
-              <button onClick={() => setSelectedScorePlayer(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+              <div className="flex gap-2">
+                <button onClick={() => setSelectedScorePlayer(null)} className="flex-1 min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+                <button onClick={cancelScoring} className="flex-1 min-h-[44px] bg-slate-700 rounded-lg font-bold text-slate-400">{t.cancel}</button>
+              </div>
             </>
           )}
         </div>
       </div>
     )}
 
-    {/* Free throw count selector — Step 1: How many FTs? */}
-    {activeModal === 'freeThrowCount' && (
+    {/* Free throw flow — Step 2: How many Free Throws? */}
+    {activeModal === 'freeThrowCount' && selectedScorePlayer && (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
         <div className="bg-slate-800 rounded-xl p-4 border-2 border-emerald-500 max-w-sm w-full modal-content">
-          <h3 className="text-lg font-black mb-4 text-emerald-400 text-center">{t.howManyFT}</h3>
+          <h3 className="text-lg font-black mb-1 text-emerald-400 text-center">#{selectedScorePlayer.number} {selectedScorePlayer.name}</h3>
+          <p className="text-center text-slate-400 text-sm mb-4">{t.howManyFT}</p>
           <div className="flex gap-3 mb-3">
             {[1, 2, 3].map(n => (
               <button
                 key={n}
-                onClick={() => { setFreeThrowCount(n); setSelectedPoints(1); setActiveModal('freeThrowPlayer'); }}
+                onClick={() => { setFreeThrowCount(n); setSelectedPoints(1); setActiveModal('freeThrowMade'); }}
                 className="flex-1 min-h-[64px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-2xl flex items-center justify-center"
               >
                 {n}
               </button>
             ))}
           </div>
-          <button onClick={() => { setActiveModal(null); setFreeThrowCount(null); }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
+          <div className="flex gap-2">
+            <button onClick={() => { setActiveModal('freeThrowPlayer'); setSelectedScorePlayer(null); }} className="flex-1 min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+            <button onClick={cancelScoring} className="flex-1 min-h-[44px] bg-slate-700 rounded-lg font-bold text-slate-400">{t.cancel}</button>
+          </div>
         </div>
       </div>
     )}
 
-    {/* Free throw player selector — Step 2: Who's shooting? */}
+    {/* Free throw flow — Step 1: Who's shooting? */}
     {activeModal === 'freeThrowPlayer' && (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
         <div className="bg-slate-800 rounded-xl p-4 border-2 border-emerald-500 max-w-sm w-full modal-content">
-          {!selectedScorePlayer ? (
-            <>
-              <h3 className="text-lg font-black mb-3 text-emerald-400 text-center">{t.whosShooting} ({freeThrowCount} FT)</h3>
-              <div className="mb-3">
-                <div className="text-xs font-bold text-orange-400 mb-1">{ourTeamName}</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {onCourtPlayers.map(player => (
-                    <button key={player.id} onClick={() => setSelectedScorePlayer({ id: player.id, name: player.name, number: player.number })} className="bg-orange-500 active:bg-orange-400 rounded-lg min-h-[48px] p-2 font-bold text-sm">
-                      #{player.number} {player.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <button onClick={() => { setActiveModal('freeThrowCount'); setSelectedScorePlayer(null); setSelectedPoints(null); }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
-            </>
-          ) : (
-            <>
-              <h3 className="text-lg font-black mb-1 text-emerald-400 text-center">#{selectedScorePlayer.number} {selectedScorePlayer.name}</h3>
-              <p className="text-center text-slate-400 text-sm mb-4">{t.howManyMade} ({freeThrowCount} FT)</p>
-              <div className="flex gap-3 mb-3">
-                {Array.from({ length: freeThrowCount + 1 }, (_, i) => i).map(n => (
-                  <button
-                    key={n}
-                    onClick={() => addFreeThrows(selectedScorePlayer.id, n)}
-                    className={`flex-1 min-h-[64px] rounded-xl font-black text-2xl flex items-center justify-center ${n === 0 ? 'bg-rose-500 active:bg-rose-400' : 'bg-emerald-500 active:bg-emerald-400'}`}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => setSelectedScorePlayer(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
-            </>
-          )}
+          <h3 className="text-lg font-black mb-3 text-emerald-400 text-center">{t.whosShooting} (1 PT)</h3>
+          <div className="mb-3">
+            <div className="text-xs font-bold text-orange-400 mb-1">{ourTeamName}</div>
+            <div className="grid grid-cols-2 gap-2">
+              {onCourtPlayers.map(player => (
+                <button key={player.id} onClick={() => { setSelectedScorePlayer({ id: player.id, name: player.name, number: player.number }); setActiveModal('freeThrowCount'); }} className="bg-orange-500 active:bg-orange-400 rounded-lg min-h-[48px] p-2 font-bold text-sm">
+                  #{player.number} {player.name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button onClick={cancelScoring} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
+        </div>
+      </div>
+    )}
+
+    {/* Free throw flow — Step 3: How many made? (neutral colors) */}
+    {activeModal === 'freeThrowMade' && selectedScorePlayer && freeThrowCount && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-emerald-500 max-w-sm w-full modal-content">
+          <h3 className="text-lg font-black mb-1 text-emerald-400 text-center">#{selectedScorePlayer.number} {selectedScorePlayer.name}</h3>
+          <p className="text-center text-slate-400 text-sm mb-4">{t.howManyMade} ({freeThrowCount} FT)</p>
+          <div className="flex gap-3 mb-3">
+            {Array.from({ length: freeThrowCount + 1 }, (_, i) => i).map(n => (
+              <button
+                key={n}
+                onClick={() => addFreeThrows(selectedScorePlayer.id, n)}
+                className="flex-1 min-h-[64px] bg-slate-500 active:bg-slate-400 rounded-xl font-black text-2xl flex items-center justify-center"
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => { setActiveModal('freeThrowCount'); setFreeThrowCount(null); }} className="flex-1 min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+            <button onClick={cancelScoring} className="flex-1 min-h-[44px] bg-slate-700 rounded-lg font-bold text-slate-400">{t.cancel}</button>
+          </div>
         </div>
       </div>
     )}
@@ -2187,7 +2210,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               <div className="flex-1 grid grid-cols-4 grid-rows-[3fr_2fr] md:grid-rows-[2fr_1fr] gap-1.5">
                 <button onClick={() => { setSelectedPoints(3); setActiveModal('score'); setPendingReplacement(null); }} className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 active:bg-indigo-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts3}</button>
                 <button onClick={() => { setSelectedPoints(2); setActiveModal('score'); setPendingReplacement(null); }} className="bg-blue-500/20 text-blue-300 border border-blue-500/30 active:bg-blue-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts2}</button>
-                <button onClick={() => { setActiveModal('freeThrowCount'); setPendingReplacement(null); }} className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 active:bg-emerald-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts1}</button>
+                <button onClick={() => { setActiveModal('freeThrowPlayer'); setSelectedScorePlayer(null); setFreeThrowCount(null); setPendingReplacement(null); }} className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 active:bg-emerald-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts1}</button>
                 <button onClick={() => { setActiveModal('foul'); setPendingReplacement(null); }} className="bg-amber-600 active:bg-amber-500 rounded-lg font-black text-lg flex items-center justify-center min-h-[56px]">
                   <Bell className="w-6 h-6" />
                 </button>

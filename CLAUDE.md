@@ -28,7 +28,7 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
   - `src/context/LanguageContext.jsx` - context + hook useTranslation()
   - `src/hooks/useSwipeGesture.js` - detección de swipe horizontal (ya no se usa en tracker, mantenido por si acaso)
 - **Guardado:** Solo Supabase (via `onGameSaved` + `syncManager`). El localStorage legacy fue eliminado.
-- **Modales:** Unificados en un solo `activeModal` useState (valores: null, 'exit', 'reset', 'quarter', 'intervals', 'score', 'foul', 'fouledOut', 'freeThrowCount', 'freeThrowPlayer') + `pendingReplacement` separado para modal de reemplazo
+- **Modales:** Unificados en un solo `activeModal` useState (valores: null, 'exit', 'reset', 'quarter', 'intervals', 'score', 'foul', 'fouledOut', 'freeThrowPlayer', 'freeThrowCount', 'freeThrowMade') + `pendingReplacement` separado para modal de reemplazo
 - **PWA (Progressive Web App)** - Se puede instalar como app en móvil
 - **Desplegada en:** https://dpdb13.github.io/playstats-basketball/
 - **Nombre oficial:** PlayStats Basketball

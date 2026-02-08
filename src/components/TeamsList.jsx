@@ -5,6 +5,7 @@ import { useTranslation } from '../context/LanguageContext';
 import { Plus, LogOut, Wifi, WifiOff, X } from 'lucide-react';
 import PlayStatsIcon from './PlayStatsIcon';
 import TeamIcon from './TeamIcon';
+import { DEFAULT_POSITIONS, getPositionClasses } from '../lib/gameUtils';
 
 export default function TeamsList() {
   const { signOut, user } = useAuth();
@@ -12,6 +13,7 @@ export default function TeamsList() {
   const { t, language, toggleLanguage } = useTranslation();
   const [showCreate, setShowCreate] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
+  const [newTeamPositions, setNewTeamPositions] = useState([...DEFAULT_POSITIONS]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [joinMessage, setJoinMessage] = useState('');
@@ -62,12 +64,15 @@ export default function TeamsList() {
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!newTeamName.trim()) return;
+    const cleanedPositions = newTeamPositions.map(p => p.trim()).filter(p => p.length > 0);
+    if (cleanedPositions.length === 0) return;
 
     setCreating(true);
     setError('');
     try {
-      const team = await createTeam(newTeamName.trim());
+      const team = await createTeam(newTeamName.trim(), '🏀', cleanedPositions);
       setNewTeamName('');
+      setNewTeamPositions([...DEFAULT_POSITIONS]);
       setShowCreate(false);
       if (team) selectTeam(team);
     } catch (err) {
@@ -180,6 +185,40 @@ export default function TeamsList() {
               autoFocus
               required
             />
+            <label className="block text-sm font-bold text-slate-400 mb-2">{t.teamPositions}</label>
+            <div className="space-y-1.5 mb-2">
+              {newTeamPositions.map((pos, idx) => {
+                const colors = getPositionClasses(idx);
+                return (
+                  <div key={idx} className="flex gap-1.5 items-center">
+                    <div className={`w-2 h-8 rounded-full ${colors.active.split(' ')[0]}`} />
+                    <input
+                      type="text"
+                      value={pos}
+                      onChange={(e) => {
+                        const updated = [...newTeamPositions];
+                        updated[idx] = e.target.value;
+                        setNewTeamPositions(updated);
+                      }}
+                      className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-orange-500 focus:outline-none"
+                      placeholder={t.positionName}
+                    />
+                    {newTeamPositions.length > 1 && (
+                      <button type="button" onClick={() => setNewTeamPositions(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 text-red-400 hover:bg-slate-700 rounded">
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={() => setNewTeamPositions(prev => [...prev, ''])}
+              className="text-emerald-400 text-sm font-bold mb-3 block"
+            >
+              + {t.addPosition}
+            </button>
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -190,7 +229,7 @@ export default function TeamsList() {
               </button>
               <button
                 type="button"
-                onClick={() => { setShowCreate(false); setNewTeamName(''); }}
+                onClick={() => { setShowCreate(false); setNewTeamName(''); setNewTeamPositions([...DEFAULT_POSITIONS]); }}
                 className="flex-1 bg-slate-600 hover:bg-slate-500 py-2 rounded-lg font-bold"
               >
                 {t.cancel}

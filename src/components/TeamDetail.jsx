@@ -409,9 +409,9 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
                                 </div>
                                 {renderGameMetaBadges(game)}
                                 <div className="text-lg font-bold mb-2">
-                                  {game.home_team} {game.home_score}
+                                  <span className="text-slate-300">{game.home_team}</span> <span className="text-white font-black">{game.home_score}</span>
                                   <span className="text-slate-500"> - </span>
-                                  {game.away_score} {game.away_team}
+                                  <span className="text-white font-black">{game.away_score}</span> <span className="text-slate-300">{game.away_team}</span>
                                 </div>
                                 <div className="text-xs text-slate-500 mb-3">
                                   Q{game.current_quarter} {game.is_home_team ? `- ${t.home}` : `- ${t.away}`}
@@ -559,12 +559,18 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
                               </div>
                               {renderGameMetaBadges(game)}
                               <div className="text-lg font-bold mb-1">
-                                <span className={game.is_home_team ? (didWin ? 'text-emerald-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
-                                  {game.home_team} {game.home_score}
+                                <span className={game.is_home_team ? (didWin ? 'text-emerald-400/70' : didLose ? 'text-red-400/70' : 'text-slate-300') : 'text-slate-300'}>
+                                  {game.home_team}
+                                </span>
+                                {' '}<span className={`font-black ${game.is_home_team ? (didWin ? 'text-emerald-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}`}>
+                                  {game.home_score}
                                 </span>
                                 <span className="text-slate-500"> - </span>
-                                <span className={!game.is_home_team ? (didWin ? 'text-emerald-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
-                                  {game.away_score} {game.away_team}
+                                <span className={`font-black ${!game.is_home_team ? (didWin ? 'text-emerald-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}`}>
+                                  {game.away_score}
+                                </span>{' '}
+                                <span className={!game.is_home_team ? (didWin ? 'text-emerald-400/70' : didLose ? 'text-red-400/70' : 'text-slate-300') : 'text-slate-300'}>
+                                  {game.away_team}
                                 </span>
                               </div>
                               <div className="text-xs text-slate-500">
@@ -675,7 +681,7 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
             <div className="bg-slate-800 rounded-xl p-5 border-2 border-slate-500 max-w-sm md:max-w-md w-full">
               <h3 className="text-lg font-black text-white mb-1">
-                {selectedFinishedGame.home_team} {selectedFinishedGame.home_score} - {selectedFinishedGame.away_score} {selectedFinishedGame.away_team}
+                <span className="text-slate-300 font-bold">{selectedFinishedGame.home_team}</span> {selectedFinishedGame.home_score} - {selectedFinishedGame.away_score} <span className="text-slate-300 font-bold">{selectedFinishedGame.away_team}</span>
               </h3>
               <p className="text-xs text-slate-400 mb-4">
                 {new Date(getGameDisplayDate(selectedFinishedGame)).toLocaleDateString(dateLocale, {

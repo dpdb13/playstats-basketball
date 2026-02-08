@@ -108,6 +108,7 @@ export const translations = {
     addPosition: 'Add Position',
     positionsUpdated: 'Positions updated',
     positionName: 'Position name',
+    teamPositions: 'Positions',
 
     // TeamsList
     myTeams: 'My Teams',
@@ -205,8 +206,8 @@ export const translations = {
 
     // Scoring flow
     whosShooting: "Who's shooting?",
-    freeThrows: 'Free throws',
-    howManyFT: 'How many free throws?',
+    freeThrows: 'Free Throws',
+    howManyFT: 'How many Free Throws?',
     howManyMade: 'How many made?',
 
     // Player card (extra)
@@ -375,6 +376,7 @@ export const translations = {
     addPosition: 'Añadir Posición',
     positionsUpdated: 'Posiciones actualizadas',
     positionName: 'Nombre de posición',
+    teamPositions: 'Posiciones',
 
     // TeamsList
     myTeams: 'Mis Equipos',
@@ -472,8 +474,8 @@ export const translations = {
 
     // Scoring flow
     whosShooting: '¿Quién tira?',
-    freeThrows: 'Tiros libres',
-    howManyFT: '¿Cuántos tiros libres?',
+    freeThrows: 'Free Throws',
+    howManyFT: '¿Cuántos Free Throws?',
     howManyMade: '¿Cuántos metió?',
 
     // Player card (extra)
