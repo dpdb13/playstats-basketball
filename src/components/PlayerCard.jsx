@@ -170,7 +170,7 @@ const PlayerCard = memo(({
         {/* Time status bar */}
         <div className={`w-1 h-8 rounded-full ${statusColor} flex-shrink-0`} />
 
-        {/* Number + Name + Stint (double-tap to edit) */}
+        {/* Number + Name (double-tap to edit) */}
         <div
           className="flex items-center gap-1 min-w-0 flex-1"
           onClick={handleNameTap}
@@ -178,8 +178,10 @@ const PlayerCard = memo(({
         >
           <span className="text-[10px] font-black text-slate-400 bg-black/30 px-1 rounded flex-shrink-0">#{player.number}</span>
           <span className="text-xs font-bold text-white truncate">{player.name}</span>
-          <span className="text-sm font-black text-white tabular-nums flex-shrink-0">{formatTime(player.currentMinutes)}</span>
         </div>
+
+        {/* Stint timer (prominent, centered) */}
+        <span className="text-sm font-black text-orange-300 tabular-nums flex-shrink-0">{formatTime(player.currentMinutes)}</span>
 
         {/* Court time / Bench time */}
         <div className="flex flex-col items-end flex-shrink-0 tabular-nums leading-tight">
