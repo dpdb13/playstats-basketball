@@ -180,8 +180,8 @@ const PlayerCard = memo(({
           <span className="text-xs font-bold text-white truncate">{player.name}</span>
         </div>
 
-        {/* Stint timer (prominent, centered) */}
-        <span className="text-sm font-black text-orange-300 tabular-nums flex-shrink-0">{formatTime(player.currentMinutes)}</span>
+        {/* Stint timer (prominent, visually centered) */}
+        <span className="text-sm font-black text-orange-300 tabular-nums flex-shrink-0 mx-1">{formatTime(player.currentMinutes)}</span>
 
         {/* Court time / Bench time */}
         <div className="flex flex-col items-end flex-shrink-0 tabular-nums leading-tight">

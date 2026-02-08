@@ -2275,9 +2275,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                 onClick={() => setShowFouls(!showFouls)}
                 className="w-full p-2 flex items-center justify-between"
               >
-                <div className="font-bold text-xs text-amber-400 flex items-center gap-1.5">
+                <div className={`font-bold text-xs flex items-center gap-1.5 ${dangerPlayers.length > 0 ? 'text-red-400' : 'text-amber-400'}`}>
                   <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>⚠️ {warningPlayers.length + dangerPlayers.length}</span>
+                  <span>{dangerPlayers.length > 0 ? '🔴' : '🟠'} {warningPlayers.length + dangerPlayers.length}</span>
                 </div>
                 {showFouls ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
               </button>
@@ -2315,45 +2315,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               )}
             </div>
           )}
-        </div>
 
-        {/* SCROLLABLE CONTENT */}
-        <div className="p-2 sm:p-3 pt-2 space-y-2 sm:space-y-3">
-
-          {/* ON COURT — with per-section expand toggle */}
-          <div className="bg-blue-900/30 rounded-lg p-2 border border-blue-700">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="bg-blue-600 px-2 py-0.5 rounded text-xs font-bold">{t.onCourt}</span>
-                <span className="text-xs font-bold">{onCourtCount}/5</span>
-              </div>
-              <button
-                onClick={() => setCourtExpanded(!courtExpanded)}
-                className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold min-h-[32px]"
-              >
-                {courtExpanded ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-              </button>
-            </div>
-            {!courtExpanded ? (
-              <div className="space-y-1">
-                {onCourtPlayers.length === 0 ? (
-                  <div className="text-center py-4 text-slate-500 text-sm">{t.select5Players}</div>
-                ) : (
-                  onCourtPlayers.map(p => renderPlayerCard(p, false, courtExpanded))
-                )}
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                {onCourtPlayers.length === 0 ? (
-                  <div className="col-span-3 sm:col-span-4 text-center py-4 text-slate-500 text-sm">{t.select5Players}</div>
-                ) : (
-                  onCourtPlayers.map(p => renderPlayerCard(p, false, courtExpanded))
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* SUB RECOMMENDATIONS — per-player cross-position expand */}
+          {/* SUB RECOMMENDATIONS — right below fouls warning */}
           {subRecommendations.length > 0 && (() => {
             const renderSuggestionBtn = (s, outId) => {
               const benchStatus = getBenchTimeStatus(s);
@@ -2374,7 +2337,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               );
             };
             return (
-              <div className="bg-slate-800 rounded-lg p-2 sm:p-3 border border-orange-700">
+              <div className="bg-slate-800 rounded-lg p-2 sm:p-3 border border-orange-700 mt-1">
                 <h3 className="font-black text-sm mb-2 text-orange-400 flex items-center gap-2">
                   <RefreshCw className="w-4 h-4" />{t.subRecommendations}
                 </h3>
@@ -2412,6 +2375,43 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               </div>
             );
           })()}
+        </div>
+
+        {/* SCROLLABLE CONTENT */}
+        <div className="p-2 sm:p-3 pt-2 space-y-2 sm:space-y-3">
+
+          {/* ON COURT — with per-section expand toggle */}
+          <div className="bg-blue-900/30 rounded-lg p-2 border border-blue-700">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="bg-blue-600 px-2 py-0.5 rounded text-xs font-bold">{t.onCourt}</span>
+                <span className="text-xs font-bold">{onCourtCount}/5</span>
+              </div>
+              <button
+                onClick={() => setCourtExpanded(!courtExpanded)}
+                className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold min-h-[32px]"
+              >
+                {courtExpanded ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+              </button>
+            </div>
+            {!courtExpanded ? (
+              <div className="space-y-1">
+                {onCourtPlayers.length === 0 ? (
+                  <div className="text-center py-4 text-slate-500 text-sm">{t.select5Players}</div>
+                ) : (
+                  onCourtPlayers.map(p => renderPlayerCard(p, false, courtExpanded))
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                {onCourtPlayers.length === 0 ? (
+                  <div className="col-span-3 sm:col-span-4 text-center py-4 text-slate-500 text-sm">{t.select5Players}</div>
+                ) : (
+                  onCourtPlayers.map(p => renderPlayerCard(p, false, courtExpanded))
+                )}
+              </div>
+            )}
+          </div>
 
           {/* BENCH */}
           <div className="bg-slate-800/50 rounded-lg p-2 border border-slate-700">
