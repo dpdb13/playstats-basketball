@@ -1,5 +1,7 @@
 import { formatTime } from './gameUtils';
 
+const escapeHtml = (str) => String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
 /**
  * Genera un reporte HTML del partido y lo descarga como archivo.
  *
@@ -41,7 +43,7 @@ export function generateReport({ ourScore, rivalScore, ourTeamName, rivalTeamNam
     differential: q.totalPointsScored - q.totalPointsAllowed,
     playerNames: q.playerIds.map(id => {
       const p = players.find(pl => pl.id === id);
-      return p ? `#${p.number} ${p.name}` : 'Unknown';
+      return p ? `#${escapeHtml(p.number)} ${escapeHtml(p.name)}` : 'Unknown';
     })
   }));
 
@@ -51,8 +53,8 @@ export function generateReport({ ourScore, rivalScore, ourTeamName, rivalTeamNam
   const playerStintStats = playersWithCurrentStint.filter(p => p.position !== 'Unselected' && p.stints.length > 0).map(p => {
     const totalPM = p.stintPlusMinus.reduce((a, b) => a + b, 0);
     return {
-      name: `#${p.number} ${p.name}`,
-      position: p.position,
+      name: `#${escapeHtml(p.number)} ${escapeHtml(p.name)}`,
+      position: escapeHtml(p.position),
       stintCount: p.stints.length,
       stints: p.stints,
       avgStint: p.stints.reduce((a, b) => a + b, 0) / p.stints.length,
@@ -64,7 +66,10 @@ export function generateReport({ ourScore, rivalScore, ourTeamName, rivalTeamNam
   const totalSubs = Object.values(substitutionsByQuarter).reduce((a, b) => a + b, 0);
   const realSubs = Math.max(0, totalSubs - 5);
 
-  const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report - ${ourTeamName} vs ${rivalTeamName}</title>
+  const safeOurTeamName = escapeHtml(ourTeamName);
+  const safeRivalTeamName = escapeHtml(rivalTeamName);
+
+  const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report - ${safeOurTeamName} vs ${safeRivalTeamName}</title>
 <style>
 body{font-family:Arial,sans-serif;padding:20px;color:#333;font-size:12px;max-width:900px;margin:0 auto}
 h1{color:#f97316;border-bottom:3px solid #f97316;padding-bottom:10px;font-size:24px}
@@ -85,9 +90,9 @@ tr:nth-child(even){background-color:#f3f4f6}
 </style></head><body>
 <h1>🏀 Game Report</h1>
 <div style="text-align:center;margin:20px 0">
-<div class="score-box">${ourTeamName}<br/>${ourScore}</div>
+<div class="score-box">${safeOurTeamName}<br/>${ourScore}</div>
 <span style="font-size:24px;margin:0 15px;vertical-align:middle">VS</span>
-<div class="score-box">${rivalTeamName}<br/>${rivalScore}</div>
+<div class="score-box">${safeRivalTeamName}<br/>${rivalScore}</div>
 </div>
 <div style="text-align:center;margin:30px 0">
 <div class="stat-box">

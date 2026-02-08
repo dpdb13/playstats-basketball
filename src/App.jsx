@@ -1,16 +1,98 @@
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TeamProvider, useTeam } from './context/TeamContext';
-import { LanguageProvider } from './context/LanguageContext';
+import { LanguageProvider, useTranslation } from './context/LanguageContext';
 import Auth from './components/Auth';
 import TeamsList from './components/TeamsList';
 import TeamDetail from './components/TeamDetail';
 import BasketballRotationTracker from './BasketballRotationTracker';
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error('App error:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-white mb-4">Something went wrong</h1>
+            <p className="text-slate-400 mb-6">An unexpected error occurred.</p>
+            <button
+              onClick={() => { this.setState({ hasError: false }); window.location.reload(); }}
+              className="bg-emerald-600 text-white px-6 py-3 rounded-lg"
+            >
+              Reload App
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function AppContent() {
   const { user, loading: authLoading } = useAuth();
-  const { currentTeam, teamPlayers, saveGame, refreshCurrentTeam } = useTeam();
+  const { currentTeam, teamPlayers, saveGame, refreshCurrentTeam, selectTeam, deselectTeam } = useTeam();
+  const { t } = useTranslation();
   const [activeGame, setActiveGame] = useState(null); // null = no game, object = playing
+
+  // State to show exit confirmation when pressing back during a game
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+  // ============================================
+  // HISTORY API — push/pop state for native back navigation
+  // ============================================
+  const getCurrentScreen = useCallback(() => {
+    if (activeGame) return 'game';
+    if (currentTeam) return 'teamDetail';
+    return 'teams';
+  }, [activeGame, currentTeam]);
+
+  // Push state when screen changes
+  useEffect(() => {
+    const screen = getCurrentScreen();
+    // Only push if the current history state doesn't match
+    const currentState = window.history.state?.screen;
+    if (currentState !== screen) {
+      window.history.pushState({ screen, teamId: currentTeam?.id }, '');
+    }
+  }, [getCurrentScreen, currentTeam]);
+
+  // Listen for popstate (back button / back gesture)
+  useEffect(() => {
+    const handlePopState = (e) => {
+      const state = e.state;
+
+      // If we're in a game, show exit confirmation instead of navigating
+      if (activeGame) {
+        // Push state back so the user stays on the page
+        window.history.pushState({ screen: 'game', teamId: currentTeam?.id }, '');
+        setShowExitConfirm(true);
+        return;
+      }
+
+      // If we're in team detail, go back to teams list
+      if (currentTeam && !activeGame) {
+        deselectTeam();
+        return;
+      }
+
+      // If we're already at teams list, push state to prevent leaving the app
+      window.history.pushState({ screen: 'teams' }, '');
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeGame, currentTeam, deselectTeam]);
 
   // Convertir jugadores del roster de Supabase al formato que espera el tracker
   const getPlayersForTracker = useCallback(() => {
@@ -68,7 +150,7 @@ function AppContent() {
       <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
-          <p>Cargando...</p>
+          <p>{t.loading}</p>
         </div>
       </div>
     );
@@ -90,6 +172,8 @@ function AppContent() {
         onGameSaved={handleGameSaved}
         teamId={currentTeam?.id}
         userId={user?.id}
+        showExitConfirm={showExitConfirm}
+        onDismissExitConfirm={() => setShowExitConfirm(false)}
       />
     );
   }
@@ -110,13 +194,15 @@ function AppContent() {
 
 function App() {
   return (
-    <AuthProvider>
-      <LanguageProvider>
-        <TeamProvider>
-          <AppContent />
-        </TeamProvider>
-      </LanguageProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <LanguageProvider>
+          <TeamProvider>
+            <AppContent />
+          </TeamProvider>
+        </LanguageProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

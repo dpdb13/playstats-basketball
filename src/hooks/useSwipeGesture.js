@@ -1,3 +1,4 @@
+// NOTE: Currently unused. Kept for potential future use.
 import { useRef, useCallback } from 'react';
 
 const SWIPE_THRESHOLD = 75; // minimum px to count as swipe

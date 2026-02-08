@@ -1,13 +1,16 @@
 import { useState, useRef } from 'react';
 import { useTeam } from '../context/TeamContext';
+import { useTranslation } from '../context/LanguageContext';
 import { ArrowLeft, Share2, Play, Eye, Trash2, Users, Wifi, WifiOff, Check, X, Camera, RotateCcw } from 'lucide-react';
 import ShareTeamModal from './ShareTeamModal';
 import PlayerRosterEditor from './PlayerRosterEditor';
 import TeamIcon from './TeamIcon';
 import ImageCropper from './ImageCropper';
+import { getTeamPositions, getPositionClasses } from '../lib/gameUtils';
 
 export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) {
-  const { currentTeam, teamGames, teamPlayers, deselectTeam, deleteGame, online, deleteTeam, updateTeam, uploadTeamAvatar } = useTeam();
+  const { currentTeam, teamGames, teamPlayers, deselectTeam, deleteGame, online, deleteTeam, updateTeam, updateTeamSettings, uploadTeamAvatar } = useTeam();
+  const { t, language } = useTranslation();
   const [showShare, setShowShare] = useState(false);
   const [activeTab, setActiveTab] = useState('games');
   const [selectedFinishedGame, setSelectedFinishedGame] = useState(null);
@@ -22,12 +25,18 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
   const [showIconEditor, setShowIconEditor] = useState(false);
   const [emojiInput, setEmojiInput] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [cropFile, setCropFile] = useState(null); // Archivo seleccionado para recortar
+  const [cropFile, setCropFile] = useState(null);
   const fileInputRef = useRef(null);
+
+  // Position editor state
+  const [editingPositions, setEditingPositions] = useState(false);
+  const [positionsForm, setPositionsForm] = useState([]);
 
   if (!currentTeam) return null;
 
+  const teamPositions = getTeamPositions(currentTeam);
   const isOwner = currentTeam.role === 'owner';
+  const dateLocale = language === 'es' ? 'es-ES' : 'en-US';
 
   const handleDeleteGame = (gameId, e) => {
     if (e) e.stopPropagation();
@@ -49,7 +58,34 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
     setShowDeleteTeam(false);
   };
 
-  // Guardar nombre
+  // Position editor functions
+  const startEditPositions = () => {
+    setPositionsForm([...teamPositions]);
+    setEditingPositions(true);
+  };
+
+  const savePositions = async () => {
+    const cleaned = positionsForm.map(p => p.trim()).filter(p => p.length > 0);
+    if (cleaned.length === 0) return;
+    try {
+      const settings = { ...(currentTeam.team_settings || {}), positions: cleaned };
+      await updateTeamSettings(currentTeam.id, settings);
+    } catch { /* ignore */ }
+    setEditingPositions(false);
+  };
+
+  const addPosition = () => {
+    setPositionsForm(prev => [...prev, '']);
+  };
+
+  const removePosition = (idx) => {
+    setPositionsForm(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const updatePositionName = (idx, value) => {
+    setPositionsForm(prev => prev.map((p, i) => i === idx ? value : p));
+  };
+
   const saveName = async () => {
     const trimmed = nameForm.trim();
     if (!trimmed || trimmed === currentTeam.name) {
@@ -62,7 +98,6 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
     setEditingName(false);
   };
 
-  // Guardar emoji
   const saveEmoji = async () => {
     const trimmed = emojiInput.trim();
     if (!trimmed) return;
@@ -73,16 +108,13 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
     setEmojiInput('');
   };
 
-  // Seleccionar foto: abre el cropper para ajustarla antes de subir
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setCropFile(file);
-    // Limpiar el input para poder seleccionar el mismo archivo otra vez
     e.target.value = '';
   };
 
-  // Subir foto ya recortada desde el cropper
   const handleCroppedUpload = async (croppedFile) => {
     setUploading(true);
     setCropFile(null);
@@ -94,14 +126,14 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4">
+    <div className="min-h-screen bg-slate-900 text-white p-4">
       <div className="max-w-md md:max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <button
               onClick={deselectTeam}
-              className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
+              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
@@ -110,7 +142,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
             <button
               onClick={() => { setShowIconEditor(true); setEmojiInput(''); }}
               className="hover:opacity-80 transition-opacity"
-              title="Cambiar icono"
+              title={t.changeIcon}
             >
               <TeamIcon icon={currentTeam.icon} size="text-2xl" imgSize="w-9 h-9" />
             </button>
@@ -123,17 +155,17 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                   value={nameForm}
                   onChange={(e) => setNameForm(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingName(false); }}
-                  className="bg-gray-700 border border-orange-500 rounded-lg px-2 py-1 text-white font-bold text-lg w-40 focus:outline-none"
+                  className="bg-slate-700 border border-orange-500 rounded-lg px-2 py-1 text-white font-bold text-lg w-40 focus:outline-none"
                   autoFocus
                 />
-                <button onClick={saveName} className="p-1 bg-green-600 rounded"><Check className="w-4 h-4" /></button>
-                <button onClick={() => setEditingName(false)} className="p-1 bg-gray-600 rounded"><X className="w-4 h-4" /></button>
+                <button onClick={saveName} className="p-1 bg-emerald-600 rounded"><Check className="w-4 h-4" /></button>
+                <button onClick={() => setEditingName(false)} className="p-1 bg-slate-600 rounded"><X className="w-4 h-4" /></button>
               </div>
             ) : (
               <h1
                 onClick={() => { setEditingName(true); setNameForm(currentTeam.name); }}
                 className="text-lg font-black text-orange-400 cursor-pointer hover:underline"
-                title="Pincha para editar"
+                title={t.tapToEdit}
               >
                 {currentTeam.name}
               </h1>
@@ -142,14 +174,13 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
 
           <div className="flex items-center gap-2">
             {online ? (
-              <Wifi className="w-4 h-4 text-green-400" />
+              <Wifi className="w-4 h-4 text-emerald-400" />
             ) : (
               <WifiOff className="w-4 h-4 text-red-400" />
             )}
             <button
               onClick={() => setShowShare(true)}
               className="p-2 bg-blue-600 hover:bg-blue-500 rounded-lg"
-              title="Compartir equipo"
             >
               <Share2 className="w-5 h-5" />
             </button>
@@ -159,24 +190,24 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Nuevo partido */}
         <button
           onClick={() => onStartGame()}
-          className="w-full mb-4 bg-green-700 hover:bg-green-600 active:bg-green-500 rounded-xl p-3 border-2 border-green-400 font-bold flex items-center justify-center gap-2"
+          className="w-full mb-4 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 rounded-xl p-3 border-2 border-emerald-400 font-bold flex items-center justify-center gap-2"
         >
-          <Play className="w-5 h-5" /> NUEVO PARTIDO
+          <Play className="w-5 h-5" /> {t.newGameBtn}
         </button>
 
         {/* Tabs */}
-        <div className="flex mb-4 bg-gray-800 rounded-lg p-1">
+        <div className="flex mb-4 bg-slate-800 rounded-lg p-1">
           <button
             onClick={() => setActiveTab('games')}
-            className={`flex-1 py-2 rounded-md font-bold text-sm transition-colors ${activeTab === 'games' ? 'bg-orange-600 text-white' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 py-2 rounded-md font-bold text-sm transition-colors ${activeTab === 'games' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-white'}`}
           >
-            Partidos ({teamGames.length})
+            {t.games} ({teamGames.length})
           </button>
           <button
             onClick={() => setActiveTab('roster')}
-            className={`flex-1 py-2 rounded-md font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'roster' ? 'bg-orange-600 text-white' : 'text-gray-400 hover:text-white'}`}
+            className={`flex-1 py-2 rounded-md font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'roster' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-white'}`}
           >
-            <Users className="w-4 h-4" /> Plantilla ({teamPlayers.length})
+            <Users className="w-4 h-4" /> {t.roster} ({teamPlayers.length})
           </button>
         </div>
 
@@ -184,10 +215,10 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {activeTab === 'games' ? (
           <div>
             {teamGames.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 text-slate-500">
                 <div className="text-4xl mb-3">🏀</div>
-                <p>No hay partidos todavia</p>
-                <p className="text-sm">Pulsa "Nuevo Partido" para empezar</p>
+                <p>{t.noGamesYet}</p>
+                <p className="text-sm">{t.tapNewGame}</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -197,45 +228,44 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                   if (inProgressGames.length === 0) return null;
                   return (
                     <div>
-                      <h3 className="text-sm font-bold text-yellow-400 mb-2 flex items-center gap-1.5">
-                        <Play className="w-4 h-4" /> En proceso ({inProgressGames.length})
+                      <h3 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-1.5">
+                        <Play className="w-4 h-4" /> {t.inProgress} ({inProgressGames.length})
                       </h3>
                       <div className="space-y-2">
                         {inProgressGames.map(game => (
                           <div
                             key={game.id}
-                            className="bg-gray-800 rounded-xl p-4 border-2 border-yellow-500"
+                            className="bg-slate-800 rounded-xl p-4 border-2 border-amber-500"
                           >
                             <div className="flex justify-between items-start mb-2">
-                              <div className="text-xs text-gray-400">
-                                {new Date(game.updated_at || game.created_at).toLocaleDateString('es-ES', {
+                              <div className="text-xs text-slate-400">
+                                {new Date(game.updated_at || game.created_at).toLocaleDateString(dateLocale, {
                                   day: 'numeric', month: 'short', year: 'numeric',
                                   hour: '2-digit', minute: '2-digit'
                                 })}
                               </div>
-                              <div className="text-xs px-2 py-0.5 rounded font-bold bg-yellow-600">
-                                En proceso
+                              <div className="text-xs px-2 py-0.5 rounded font-bold bg-amber-600">
+                                {t.inProgress}
                               </div>
                             </div>
                             <div className="text-lg font-bold mb-2">
                               {game.home_team} {game.home_score}
-                              <span className="text-gray-500"> - </span>
+                              <span className="text-slate-500"> - </span>
                               {game.away_score} {game.away_team}
                             </div>
-                            <div className="text-xs text-gray-500 mb-3">
-                              Q{game.current_quarter} {game.is_home_team ? '- Home' : '- Away'}
+                            <div className="text-xs text-slate-500 mb-3">
+                              Q{game.current_quarter} {game.is_home_team ? `- ${t.home}` : `- ${t.away}`}
                             </div>
                             <div className="flex gap-2">
                               <button
                                 onClick={() => onContinueGame(game)}
-                                className="flex-1 bg-yellow-600 hover:bg-yellow-500 active:bg-yellow-400 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1"
+                                className="flex-1 bg-amber-600 hover:bg-amber-500 active:bg-amber-400 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1"
                               >
-                                <Play className="w-4 h-4" /> Continuar
+                                <Play className="w-4 h-4" /> {t.continue}
                               </button>
                               <button
                                 onClick={(e) => handleDeleteGame(game.id, e)}
                                 className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg font-bold text-sm"
-                                title="Eliminar"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -253,8 +283,8 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                   if (completedGames.length === 0) return null;
                   return (
                     <div>
-                      <h3 className="text-sm font-bold text-green-400 mb-2 flex items-center gap-1.5">
-                        <Check className="w-4 h-4" /> Finalizados ({completedGames.length})
+                      <h3 className="text-sm font-bold text-emerald-400 mb-2 flex items-center gap-1.5">
+                        <Check className="w-4 h-4" /> {t.completed} ({completedGames.length})
                       </h3>
                       <div className="space-y-2">
                         {completedGames.map(game => {
@@ -267,39 +297,38 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                             <div
                               key={game.id}
                               onClick={() => setSelectedFinishedGame(game)}
-                              className="bg-gray-800 rounded-xl p-4 border-2 border-gray-600 hover:border-gray-400 cursor-pointer transition-colors"
+                              className="bg-slate-800 rounded-xl p-4 border-2 border-slate-600 hover:border-slate-400 cursor-pointer transition-colors"
                             >
                               <div className="flex justify-between items-start mb-2">
-                                <div className="text-xs text-gray-400">
-                                  {new Date(game.updated_at || game.created_at).toLocaleDateString('es-ES', {
+                                <div className="text-xs text-slate-400">
+                                  {new Date(game.updated_at || game.created_at).toLocaleDateString(dateLocale, {
                                     day: 'numeric', month: 'short', year: 'numeric',
                                     hour: '2-digit', minute: '2-digit'
                                   })}
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <div className={`text-xs px-2 py-0.5 rounded font-bold ${didWin ? 'bg-green-600' : didLose ? 'bg-red-600' : 'bg-gray-600'}`}>
-                                    {didWin ? 'Victoria' : didLose ? 'Derrota' : 'Empate'}
+                                  <div className={`text-xs px-2 py-0.5 rounded font-bold ${didWin ? 'bg-emerald-600' : didLose ? 'bg-red-600' : 'bg-slate-600'}`}>
+                                    {didWin ? t.victory : didLose ? t.defeat : t.draw}
                                   </div>
                                   <button
                                     onClick={(e) => handleDeleteGame(game.id, e)}
                                     className="p-1 bg-red-600/80 hover:bg-red-500 rounded"
-                                    title="Eliminar"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
                               </div>
                               <div className="text-lg font-bold mb-1">
-                                <span className={game.is_home_team ? (didWin ? 'text-green-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
+                                <span className={game.is_home_team ? (didWin ? 'text-emerald-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
                                   {game.home_team} {game.home_score}
                                 </span>
-                                <span className="text-gray-500"> - </span>
-                                <span className={!game.is_home_team ? (didWin ? 'text-green-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
+                                <span className="text-slate-500"> - </span>
+                                <span className={!game.is_home_team ? (didWin ? 'text-emerald-400' : didLose ? 'text-red-400' : 'text-white') : 'text-white'}>
                                   {game.away_score} {game.away_team}
                                 </span>
                               </div>
-                              <div className="text-xs text-gray-500">
-                                Q{game.current_quarter} {game.is_home_team ? '- Home' : '- Away'}
+                              <div className="text-xs text-slate-500">
+                                Q{game.current_quarter} {game.is_home_team ? `- ${t.home}` : `- ${t.away}`}
                               </div>
                             </div>
                           );
@@ -312,17 +341,70 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
             )}
           </div>
         ) : (
-          <PlayerRosterEditor />
+          <>
+          {/* Position editor */}
+          {isOwner && (
+            <div className="mb-4">
+              {editingPositions ? (
+                <div className="bg-slate-800 rounded-lg p-3 border border-orange-500">
+                  <div className="text-xs font-bold text-orange-400 mb-2">{t.editPositions}</div>
+                  <div className="space-y-1.5 mb-2">
+                    {positionsForm.map((pos, idx) => {
+                      const colors = getPositionClasses(idx);
+                      return (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${colors.active}`}>{idx + 1}</span>
+                          <input
+                            type="text"
+                            value={pos}
+                            onChange={(e) => updatePositionName(idx, e.target.value)}
+                            className="flex-1 bg-slate-700 px-2 py-1 rounded text-sm text-white"
+                            placeholder={t.positionName}
+                          />
+                          {positionsForm.length > 1 && (
+                            <button onClick={() => removePosition(idx)} className="p-1 text-red-400 hover:bg-slate-700 rounded">
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={addPosition}
+                    className="w-full py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm text-slate-300 font-bold mb-2"
+                  >
+                    + {t.addPosition}
+                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={savePositions} className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded font-bold text-sm">
+                      <Check className="w-4 h-4 inline mr-1" />{t.save}
+                    </button>
+                    <button onClick={() => setEditingPositions(false)} className="flex-1 py-1.5 bg-slate-600 hover:bg-slate-500 rounded font-bold text-sm">{t.cancel}</button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={startEditPositions}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-bold text-slate-400 border border-slate-700"
+                >
+                  {t.editPositions}: {teamPositions.join(', ')}
+                </button>
+              )}
+            </div>
+          )}
+          <PlayerRosterEditor teamPositions={teamPositions} />
+          </>
         )}
 
         {/* Eliminar equipo (solo owner) */}
         {isOwner && (
-          <div className="mt-8 pt-4 border-t border-gray-700">
+          <div className="mt-8 pt-4 border-t border-slate-700">
             <button
               onClick={() => setShowDeleteTeam(true)}
               className="w-full py-2 bg-red-900/30 hover:bg-red-900/50 border border-red-700 rounded-lg text-red-400 text-sm font-bold"
             >
-              Eliminar equipo
+              {t.deleteTeamTitle}
             </button>
           </div>
         )}
@@ -335,14 +417,14 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Modal eliminar equipo */}
         {showDeleteTeam && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-5 border-2 border-red-500 max-w-sm md:max-w-md w-full">
-              <h3 className="text-lg font-black text-red-400 mb-3">Eliminar equipo</h3>
-              <p className="text-gray-300 text-sm mb-4">
-                Se eliminaran todos los partidos y datos del equipo <strong>{currentTeam.name}</strong>. Esta accion no se puede deshacer.
+            <div className="bg-slate-800 rounded-xl p-5 border-2 border-red-500 max-w-sm md:max-w-md w-full">
+              <h3 className="text-lg font-black text-red-400 mb-3">{t.deleteTeamTitle}</h3>
+              <p className="text-slate-300 text-sm mb-4">
+                {t.deleteTeamMsg(currentTeam.name)}
               </p>
               <div className="flex gap-2">
-                <button onClick={handleDeleteTeam} className="flex-1 bg-red-600 hover:bg-red-500 py-2 rounded-lg font-bold">Si, eliminar</button>
-                <button onClick={() => setShowDeleteTeam(false)} className="flex-1 bg-gray-600 hover:bg-gray-500 py-2 rounded-lg font-bold">Cancelar</button>
+                <button onClick={handleDeleteTeam} className="flex-1 bg-red-600 hover:bg-red-500 py-2 rounded-lg font-bold">{t.yesDelete}</button>
+                <button onClick={() => setShowDeleteTeam(false)} className="flex-1 bg-slate-600 hover:bg-slate-500 py-2 rounded-lg font-bold">{t.cancel}</button>
               </div>
             </div>
           </div>
@@ -351,12 +433,12 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Modal opciones partido finalizado */}
         {selectedFinishedGame && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-5 border-2 border-gray-500 max-w-sm md:max-w-md w-full">
+            <div className="bg-slate-800 rounded-xl p-5 border-2 border-slate-500 max-w-sm md:max-w-md w-full">
               <h3 className="text-lg font-black text-white mb-1">
                 {selectedFinishedGame.home_team} {selectedFinishedGame.home_score} - {selectedFinishedGame.away_score} {selectedFinishedGame.away_team}
               </h3>
-              <p className="text-xs text-gray-400 mb-4">
-                {new Date(selectedFinishedGame.updated_at || selectedFinishedGame.created_at).toLocaleDateString('es-ES', {
+              <p className="text-xs text-slate-400 mb-4">
+                {new Date(selectedFinishedGame.updated_at || selectedFinishedGame.created_at).toLocaleDateString(dateLocale, {
                   day: 'numeric', month: 'short', year: 'numeric',
                   hour: '2-digit', minute: '2-digit'
                 })}
@@ -370,7 +452,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                   }}
                   className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
                 >
-                  <Eye className="w-5 h-5" /> Visualizar
+                  <Eye className="w-5 h-5" /> {t.view}
                 </button>
                 <button
                   onClick={() => {
@@ -378,9 +460,9 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                     setSelectedFinishedGame(null);
                     onContinueGame({ ...game, status: 'in_progress' });
                   }}
-                  className="w-full bg-yellow-600 hover:bg-yellow-500 active:bg-yellow-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
+                  className="w-full bg-amber-600 hover:bg-amber-500 active:bg-amber-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
                 >
-                  <RotateCcw className="w-5 h-5" /> Reanudar partido
+                  <RotateCcw className="w-5 h-5" /> {t.resume}
                 </button>
                 <button
                   onClick={() => {
@@ -389,13 +471,13 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                   }}
                   className="w-full bg-red-600 hover:bg-red-500 active:bg-red-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
                 >
-                  <Trash2 className="w-5 h-5" /> Eliminar
+                  <Trash2 className="w-5 h-5" /> {t.delete}
                 </button>
                 <button
                   onClick={() => setSelectedFinishedGame(null)}
-                  className="w-full bg-gray-600 hover:bg-gray-500 active:bg-gray-400 py-3 rounded-lg font-bold"
+                  className="w-full bg-slate-600 hover:bg-slate-500 active:bg-slate-400 py-3 rounded-lg font-bold"
                 >
-                  Cancelar
+                  {t.cancel}
                 </button>
               </div>
             </div>
@@ -405,23 +487,23 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Modal confirmar eliminar partido */}
         {gameToDelete && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-5 border-2 border-red-500 max-w-sm md:max-w-md w-full">
-              <h3 className="text-lg font-black text-red-400 mb-3">Eliminar partido</h3>
-              <p className="text-gray-300 text-sm mb-4">
-                Este partido se eliminara permanentemente. Esta accion no se puede deshacer.
+            <div className="bg-slate-800 rounded-xl p-5 border-2 border-red-500 max-w-sm md:max-w-md w-full">
+              <h3 className="text-lg font-black text-red-400 mb-3">{t.deleteGameTitle}</h3>
+              <p className="text-slate-300 text-sm mb-4">
+                {t.deleteGameMsg}
               </p>
               <div className="flex gap-2">
                 <button
                   onClick={confirmDeleteGame}
                   className="flex-1 bg-red-600 hover:bg-red-500 py-2 rounded-lg font-bold"
                 >
-                  Si, eliminar
+                  {t.yesDelete}
                 </button>
                 <button
                   onClick={() => setGameToDelete(null)}
-                  className="flex-1 bg-gray-600 hover:bg-gray-500 py-2 rounded-lg font-bold"
+                  className="flex-1 bg-slate-600 hover:bg-slate-500 py-2 rounded-lg font-bold"
                 >
-                  Cancelar
+                  {t.cancel}
                 </button>
               </div>
             </div>
@@ -440,56 +522,47 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
         {/* Modal editar icono */}
         {showIconEditor && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl p-5 border-2 border-orange-500 max-w-sm md:max-w-md w-full">
+            <div className="bg-slate-800 rounded-xl p-5 border-2 border-orange-500 max-w-sm md:max-w-md w-full">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-black text-orange-400">Cambiar icono</h3>
-                <button onClick={() => setShowIconEditor(false)} className="p-1 bg-gray-700 rounded-lg hover:bg-gray-600">
+                <h3 className="text-lg font-black text-orange-400">{t.changeIcon}</h3>
+                <button onClick={() => setShowIconEditor(false)} className="p-1 bg-slate-700 rounded-lg hover:bg-slate-600">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Icono actual */}
               <div className="text-center mb-4">
                 <TeamIcon icon={currentTeam.icon} size="text-5xl" imgSize="w-16 h-16" className="mx-auto" />
               </div>
 
-              {/* Opcion 1: escribir emoji */}
               <div className="mb-4">
-                <label className="block text-sm font-bold text-gray-400 mb-1">Escribir un emoji</label>
+                <label className="block text-sm font-bold text-slate-400 mb-1">{t.writeEmoji}</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={emojiInput}
                     onChange={(e) => setEmojiInput(e.target.value)}
-                    className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-xl text-center focus:border-orange-500 focus:outline-none"
+                    className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-xl text-center focus:border-orange-500 focus:outline-none"
                     placeholder="🏀"
                   />
                   <button
                     onClick={saveEmoji}
                     disabled={!emojiInput.trim()}
-                    className="bg-green-600 hover:bg-green-500 px-4 py-2 rounded-lg font-bold disabled:opacity-50"
+                    className="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-bold disabled:opacity-50"
                   >
                     <Check className="w-5 h-5" />
                   </button>
                 </div>
               </div>
 
-              {/* Emojis rapidos */}
               <div className="mb-4">
-                <label className="block text-sm font-bold text-gray-400 mb-1">Emojis rapidos</label>
+                <label className="block text-sm font-bold text-slate-400 mb-1">{t.quickEmojis}</label>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    // Baloncesto y deportes
                     '🏀', '⛹️', '🏅', '🏆', '🥇', '🎽', '👟', '🏟️',
-                    // Simbolos utiles
                     '✅', '❌', '🔥', '🎯', '⚡', '💪', '⭐', '✨',
-                    // Tiempo y juego
                     '⏳', '⏱️', '🔔', '📊', '📈', '🚀',
-                    // Animales (mascotas de equipo)
                     '🐯', '🦁', '🐺', '🦅', '🐻', '🦈', '🐉', '🦬',
-                    // Colores y escudos
                     '🔴', '🔵', '🟢', '🟡', '🟠', '🟣', '⚫', '🛡️',
-                    // Otros deportivos
                     '👊', '💥', '🏹', '⚔️', '👑', '💎'
                   ].map(emoji => (
                     <button
@@ -498,7 +571,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                         try { await updateTeam(currentTeam.id, { icon: emoji }); } catch { /* ignore */ }
                         setShowIconEditor(false);
                       }}
-                      className="text-2xl p-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg"
+                      className="text-2xl p-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg"
                     >
                       {emoji}
                     </button>
@@ -506,9 +579,8 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                 </div>
               </div>
 
-              {/* Opcion 2: subir foto */}
               <div>
-                <label className="block text-sm font-bold text-gray-400 mb-1">Subir una foto</label>
+                <label className="block text-sm font-bold text-slate-400 mb-1">{t.uploadPhoto}</label>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -522,7 +594,7 @@ export default function TeamDetail({ onStartGame, onContinueGame, onViewGame }) 
                   className="w-full bg-blue-600 hover:bg-blue-500 py-2 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <Camera className="w-5 h-5" />
-                  {uploading ? 'Subiendo...' : 'Elegir foto'}
+                  {uploading ? t.uploading : t.choosePhoto}
                 </button>
               </div>
             </div>

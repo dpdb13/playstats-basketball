@@ -62,7 +62,7 @@ export function TeamProvider({ children }) {
       if (isOnline()) {
         const { data, error } = await supabase
           .from('team_members')
-          .select('team_id, role, teams(id, name, icon, invite_code, created_by)')
+          .select('team_id, role, teams(id, name, icon, invite_code, created_by, team_settings)')
           .eq('user_id', user.id);
 
         if (error) throw error;
@@ -264,10 +264,13 @@ export function TeamProvider({ children }) {
       .single();
 
     if (error) throw error;
-    setTeamPlayers(prev => [...prev, data]);
-    setCachedPlayers(currentTeam.id, [...teamPlayers, data]);
+    setTeamPlayers(prev => {
+      const updated = [...prev, data];
+      setCachedPlayers(currentTeam.id, updated);
+      return updated;
+    });
     return data;
-  }, [currentTeam, teamPlayers]);
+  }, [currentTeam]);
 
   const updatePlayer = useCallback(async (playerId, updates) => {
     if (!currentTeam) return;
@@ -398,6 +401,21 @@ export function TeamProvider({ children }) {
     }
   }, [currentTeam]);
 
+  // Actualizar team_settings (posiciones, etc.)
+  const updateTeamSettings = useCallback(async (teamId, settings) => {
+    const { error } = await supabase
+      .from('teams')
+      .update({ team_settings: settings })
+      .eq('id', teamId);
+
+    if (error) throw error;
+
+    setTeams(prev => prev.map(t => t.id === teamId ? { ...t, team_settings: settings } : t));
+    if (currentTeam?.id === teamId) {
+      setCurrentTeam(prev => ({ ...prev, team_settings: settings }));
+    }
+  }, [currentTeam]);
+
   // Subir avatar de equipo
   const uploadTeamAvatar = useCallback(async (teamId, file) => {
     const ext = file.name.split('.').pop();
@@ -448,7 +466,7 @@ export function TeamProvider({ children }) {
       loading, online,
       loadTeams, createTeam, selectTeam, deselectTeam, deleteTeam,
       joinTeam, regenerateInviteCode, getTeamByInviteCode,
-      updateTeam, uploadTeamAvatar,
+      updateTeam, updateTeamSettings, uploadTeamAvatar,
       addPlayer, updatePlayer, deletePlayer,
       saveGame, deleteGame, refreshCurrentTeam
     }}>

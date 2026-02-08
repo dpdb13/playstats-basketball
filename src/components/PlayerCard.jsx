@@ -20,9 +20,11 @@ const PlayerCard = memo(({
   onToggleCourt,
   onAdjustFouls,
   getCourtTimeStatus,
-  getBenchTimeStatus
+  getBenchTimeStatus,
+  teamPositions
 }) => {
   const { t } = useTranslation();
+  const positions = teamPositions || ['Base', 'Alero', 'Joker'];
   const isFouledOut = player.fouls >= 5;
   const isUnselected = player.position === 'Unselected';
   const isEditing = editingPlayer === player.id;
@@ -112,10 +114,10 @@ const PlayerCard = memo(({
           onChange={(e) => onEditFormChange({...editForm, position: e.target.value})}
           className="w-full bg-slate-900 text-white px-2 py-1 rounded text-xs mb-1"
         >
-          <option value="Base">Base</option>
-          <option value="Alero">Alero</option>
-          <option value="Joker">Joker</option>
-          <option value="Unselected">No</option>
+          <option value="Unselected">{t.unselected || 'Unselected'}</option>
+          {positions.map(pos => (
+            <option key={pos} value={pos}>{pos}</option>
+          ))}
         </select>
         <div className="flex gap-1">
           <button onClick={onSaveEdit} className="flex-1 min-h-[44px] bg-emerald-600 rounded text-sm font-bold">✓</button>
@@ -141,8 +143,11 @@ const PlayerCard = memo(({
           <span className="text-xs font-bold text-white truncate">{player.name}</span>
         </div>
 
-        {/* Stint time */}
-        <span className="text-xs font-bold text-slate-300 tabular-nums flex-shrink-0">{formatTime(player.currentMinutes)}</span>
+        {/* Stint / Total time */}
+        <span className="text-xs font-bold text-slate-300 tabular-nums flex-shrink-0">{formatTime(player.currentMinutes)}<span className="text-slate-500">/{formatTime(player.totalCourtTime)}</span></span>
+
+        {/* Points */}
+        <span className="text-xs font-bold text-orange-300 tabular-nums flex-shrink-0">{player.points}p</span>
 
         {/* Fouls */}
         <div className="relative flex-shrink-0">
@@ -159,13 +164,13 @@ const PlayerCard = memo(({
                 <button
                   onClick={() => handleFoulAdjust(-1)}
                   disabled={player.fouls <= 0}
-                  className={`w-8 h-8 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-red-600 active:bg-red-500'}`}
+                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-red-600 active:bg-red-500'}`}
                 >-</button>
                 <span className="text-lg font-black text-white w-6 text-center tabular-nums">{player.fouls}</span>
                 <button
                   onClick={() => handleFoulAdjust(1)}
                   disabled={player.fouls >= 5}
-                  className={`w-8 h-8 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-600 active:bg-emerald-500'}`}
+                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-600 active:bg-emerald-500'}`}
                 >+</button>
               </div>
             </>
@@ -196,7 +201,7 @@ const PlayerCard = memo(({
         </div>
         <button
           onClick={() => onStartEditing(player)}
-          className="p-0.5 ml-1 flex-shrink-0"
+          className="p-0.5 ml-1 flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
         >
           <Edit3 className="w-3 h-3 md:w-4 md:h-4 text-slate-400" />
         </button>
@@ -224,13 +229,13 @@ const PlayerCard = memo(({
                 <button
                   onClick={() => handleFoulAdjust(-1)}
                   disabled={player.fouls <= 0}
-                  className={`w-8 h-8 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-red-600 active:bg-red-500'}`}
+                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls <= 0 ? 'bg-slate-600 opacity-40' : 'bg-red-600 active:bg-red-500'}`}
                 >-</button>
                 <span className="text-lg font-black text-white w-6 text-center tabular-nums">{player.fouls}</span>
                 <button
                   onClick={() => handleFoulAdjust(1)}
                   disabled={player.fouls >= 5}
-                  className={`w-8 h-8 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-600 active:bg-emerald-500'}`}
+                  className={`w-11 h-11 rounded-lg font-black text-lg flex items-center justify-center ${player.fouls >= 5 ? 'bg-slate-600 opacity-40' : 'bg-emerald-600 active:bg-emerald-500'}`}
                 >+</button>
               </div>
             </>

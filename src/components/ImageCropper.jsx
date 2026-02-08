@@ -1,9 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { ZoomIn, ZoomOut, Maximize, Check, X, RotateCcw } from 'lucide-react';
+import { useTranslation } from '../context/LanguageContext';
 
 // Editor de imagen para recortar y ajustar logos de equipo
 // Permite mover, hacer zoom y auto-ajustar la imagen antes de subirla
 export default function ImageCropper({ file, onCrop, onCancel }) {
+  const { t } = useTranslation();
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
   const containerRef = useRef(null);
@@ -210,26 +212,26 @@ export default function ImageCropper({ file, onCrop, onCancel }) {
 
   return (
     <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60] p-4">
-      <div className="bg-gray-800 rounded-xl p-4 border-2 border-orange-500 max-w-sm w-full">
+      <div className="bg-slate-800 rounded-xl p-4 border-2 border-orange-500 max-w-sm w-full">
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-black text-orange-400">Ajustar imagen</h3>
+          <h3 className="text-lg font-black text-orange-400">{t.adjustImage}</h3>
           <button
             onClick={onCancel}
-            className="p-1 bg-gray-700 rounded-lg hover:bg-gray-600"
+            className="p-1 bg-slate-700 rounded-lg hover:bg-slate-600"
           >
             <X className="w-5 h-5 text-white" />
           </button>
         </div>
 
-        <p className="text-xs text-gray-400 mb-3">
-          Arrastra para mover. Usa el slider para hacer zoom.
+        <p className="text-xs text-slate-400 mb-3">
+          {t.dragToMove}
         </p>
 
         {/* Area de recorte */}
         <div
           ref={containerRef}
-          className="relative mx-auto mb-3 rounded-xl overflow-hidden border-2 border-gray-600"
+          className="relative mx-auto mb-3 rounded-xl overflow-hidden border-2 border-slate-600"
           style={{ width: CROP_SIZE, height: CROP_SIZE, cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' }}
         >
           <canvas
@@ -257,7 +259,7 @@ export default function ImageCropper({ file, onCrop, onCancel }) {
         <div className="flex items-center gap-2 mb-3 px-1">
           <button
             onClick={zoomOut}
-            className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg"
+            className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg"
           >
             <ZoomOut className="w-4 h-4 text-white" />
           </button>
@@ -272,7 +274,7 @@ export default function ImageCropper({ file, onCrop, onCancel }) {
           />
           <button
             onClick={zoomIn}
-            className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg"
+            className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg"
           >
             <ZoomIn className="w-4 h-4 text-white" />
           </button>
@@ -282,21 +284,21 @@ export default function ImageCropper({ file, onCrop, onCancel }) {
         <div className="flex gap-2 mb-4">
           <button
             onClick={() => autoFit(null)}
-            className="flex-1 bg-gray-700 hover:bg-gray-600 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5"
+            className="flex-1 bg-slate-700 hover:bg-slate-600 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5"
           >
-            <Maximize className="w-4 h-4" /> Encajar
+            <Maximize className="w-4 h-4" /> {t.fit}
           </button>
           <button
             onClick={autoFill}
-            className="flex-1 bg-gray-700 hover:bg-gray-600 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5"
+            className="flex-1 bg-slate-700 hover:bg-slate-600 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5"
           >
-            <ZoomIn className="w-4 h-4" /> Rellenar
+            <ZoomIn className="w-4 h-4" /> {t.fill}
           </button>
           <button
             onClick={() => { setOffset({ x: 0, y: 0 }); setZoom(1); }}
-            className="flex-1 bg-gray-700 hover:bg-gray-600 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5"
+            className="flex-1 bg-slate-700 hover:bg-slate-600 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5"
           >
-            <RotateCcw className="w-4 h-4" /> Reset
+            <RotateCcw className="w-4 h-4" /> {t.resetImage}
           </button>
         </div>
 
@@ -304,17 +306,17 @@ export default function ImageCropper({ file, onCrop, onCancel }) {
         <div className="flex gap-2">
           <button
             onClick={onCancel}
-            className="flex-1 bg-gray-600 hover:bg-gray-500 py-2.5 rounded-lg font-bold"
+            className="flex-1 bg-slate-600 hover:bg-slate-500 py-2.5 rounded-lg font-bold"
           >
-            Cancelar
+            {t.cancelBtn}
           </button>
           <button
             onClick={handleCrop}
             disabled={processing || !imageLoaded}
-            className="flex-1 bg-green-600 hover:bg-green-500 py-2.5 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+            className="flex-1 bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Check className="w-5 h-5" />
-            {processing ? 'Procesando...' : 'Guardar'}
+            {processing ? t.processing : t.save}
           </button>
         </div>
       </div>
