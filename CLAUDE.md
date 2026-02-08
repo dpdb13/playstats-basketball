@@ -19,12 +19,12 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - **Lucide React** - iconos (Clock, Users, Play, etc.)
 
 ## Estado actual del código
-- **Componente principal:** `BasketballRotationTracker.jsx` (~2,138 líneas)
+- **Componente principal:** `BasketballRotationTracker.jsx` (~2,200 líneas)
 - **Archivos extraídos:**
   - `src/lib/gameUtils.js` - funciones de utilidad (formatTime, getFoulStatus, posiciones configurables, etc.)
   - `src/components/PlayerCard.jsx` - componente de tarjeta de jugador (con vista compacta y expandida)
   - `src/lib/generateReport.js` - generación de reportes HTML
-  - `src/i18n/translations.js` - traducciones EN/ES (~115+ keys)
+  - `src/i18n/translations.js` - traducciones EN/ES (~140+ keys)
   - `src/context/LanguageContext.jsx` - context + hook useTranslation()
   - `src/hooks/useSwipeGesture.js` - detección de swipe horizontal (ya no se usa en tracker, mantenido por si acaso)
 - **Guardado:** Solo Supabase (via `onGameSaved` + `syncManager`). El localStorage legacy fue eliminado.
@@ -33,7 +33,7 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - **Desplegada en:** https://dpdb13.github.io/playstats-basketball/
 - **Nombre oficial:** PlayStats Basketball
 - **Service Worker:** Auto-actualización implementada (detecta nueva versión y recarga automáticamente)
-- **Cache actual:** `basketball-rotation-v27`
+- **Cache actual:** `basketball-rotation-v28`
 - **Manifest:** `orientation: "any"` (permite horizontal y vertical)
 - **History API:** pushState/popstate para navegación nativa de back en iOS/Android
 - **Supabase schema:** Columna `team_settings JSONB` en tabla `teams` para posiciones configurables
@@ -78,9 +78,16 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - Puntos individuales de cada jugador
 - Botones 3 PTS / 2 PTS / 1 PT con colores suaves
 - **Flujo made/missed:** seleccionar puntos → seleccionar jugador → ✓ MADE / ✗ MISSED
-  - MISSED no suma puntos pero registra en eventLog (type: 'miss') e incrementa `missedShots`
-  - MADE suma puntos y registra con subtype: 'made'
-  - Rival: flujo directo sin made/missed
+  - MISSED no suma puntos pero registra en eventLog (type: 'miss') e incrementa `missedShots` + `shotStats`
+  - MADE suma puntos y registra con subtype: 'made' + actualiza `shotStats`
+  - Rival: Made/Missed flow (antes era directo), registra 'miss' en eventLog
+- **Shot stats por tipo:** `shotStats: { pts3: { made, missed }, pts2: { made, missed }, pts1: { made, missed } }` en playerState
+  - Se actualiza en `addPoints`, `addFreeThrows`, y se revierte en undo
+  - Visible en PlayerCard expandida como "3PT 3/4, 2PT 1/2, 1PT 0/0"
+- **Colores de equipo:** 10 colores con clases Tailwind completas (bg, border, text, ring)
+  - `TEAM_COLORS` array + `getTeamColor()` en gameUtils.js
+  - Wizard de creación de partido: Home/Away → color equipo → nombre rival → color rival
+  - Colores dinámicos en scoreboard, botones de score modal
 
 ### Recomendaciones de cambio
 - Detecta jugadores que llevan mucho tiempo en pista (rojo)
@@ -307,6 +314,37 @@ Cada evento vinculado al quinteto que estaba jugando → permite correlaciones p
 - Función `get_team_by_invite_code` existe en Supabase pero no está en `supabase-schema.sql` versionado
 
 ## Historial de conversaciones
+
+### 8 febrero 2026 - Sesión 15: Color Picker + Shot Stats + Rival Made/Missed + PlayerCard v28
+
+**3 agentes Opus en paralelo + 1 agente QA Opus adversarial:**
+
+**Nuevas features (4):**
+1. **Game creation wizard 4 pasos:** Home/Away → color picker (10 colores) → nombre rival (opcional) → color rival
+2. **Shot stats por tipo:** 3PT/2PT/1PT made+missed por jugador, con `shotStats` en `createInitialPlayerState`
+3. **Rival made/missed:** flujo de 2 pasos para scoring del rival (antes era directo)
+4. **PlayerCard rediseño:**
+   - Compacta: quitados foul dots (solo número)
+   - Expandida: shot breakdown "3PT 3/4, 2PT 1/2, 1PT 0/0", altura uniforme, sin tiempos
+
+**QA adversarial (13 issues: 3 CRITICAL, 6 MEDIUM, 4 LOW):**
+- CRITICAL: undo no revertía shotStats para score, miss y FT → arreglado
+- MEDIUM: confirmReset no reseteaba nuevos estados → arreglado
+- MEDIUM: undo rivalMiss sin handler → arreglado
+- MEDIUM: miss actionHistory no guardaba points → arreglado
+- MEDIUM: createNewGame legacy sin colores en initialState → arreglado
+- MEDIUM: createNewGameWithColors no reseteaba setupOurColor/setupRivalColor → arreglado
+
+**Archivos:** 6 modificados, 613 insertions, 109 deletions
+**Cache:** v27 → v28, desplegado a GitHub Pages
+**Notion:** actualizado con Development Log
+
+**Nuevos estados:** setupStep, setupIsHome, setupOurColor, setupRivalColor, setupRivalName, ourTeamColorId, rivalTeamColorId, rivalScoringStep
+**Nuevo export gameUtils:** TEAM_COLORS (10 colores), getTeamColor()
+**Nuevo campo playerState:** shotStats: { pts3: {made,missed}, pts2: {made,missed}, pts1: {made,missed} }
+**24 nuevas translation keys** (EN/ES): color picker, shot stats, rival scoring, color names
+
+---
 
 ### 8 febrero 2026 - Sesión 14: Feature Batch v27 (11 features + QA)
 
