@@ -311,14 +311,11 @@ const PlayerCard = memo(({
         )}
       </div>
 
-      {/* IN/OUT button */}
-      <button
-        onClick={() => onToggleCourt(player.id)}
-        disabled={isFouledOut || isUnselected || (isRosterView && player.onCourt)}
-        className={`w-full min-h-[44px] rounded-lg font-bold text-xs md:text-sm ${isFouledOut || isUnselected || (isRosterView && player.onCourt) ? 'bg-slate-600 opacity-50' : player.onCourt ? 'bg-rose-500 active:bg-rose-400' : 'bg-emerald-500 active:bg-emerald-400'}`}
-      >
-        {isUnselected ? t.na : player.onCourt ? t.outBtn : t.inBtn}
-      </button>
+      {/* Minutes played box */}
+      <div className="bg-black/30 rounded px-2 py-1.5 text-center">
+        <div className="text-sm md:text-base font-black text-white tabular-nums">{formatTime(player.totalCourtTime)}</div>
+        <div className="text-[10px] text-slate-500 font-bold">{t.minutesPlayed}</div>
+      </div>
     </div>
   );
 });
