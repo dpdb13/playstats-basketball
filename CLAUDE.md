@@ -24,7 +24,7 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
   - `src/lib/gameUtils.js` - funciones de utilidad (formatTime, getFoulStatus, posiciones configurables, etc.)
   - `src/components/PlayerCard.jsx` - componente de tarjeta de jugador (con vista compacta y expandida)
   - `src/lib/generateReport.js` - generación de reportes HTML
-  - `src/i18n/translations.js` - traducciones EN/ES (~140+ keys)
+  - `src/i18n/translations.js` - traducciones EN/ES (~145+ keys)
   - `src/context/LanguageContext.jsx` - context + hook useTranslation()
   - `src/hooks/useSwipeGesture.js` - detección de swipe horizontal (ya no se usa en tracker, mantenido por si acaso)
 - **Guardado:** Solo Supabase (via `onGameSaved` + `syncManager`). El localStorage legacy fue eliminado.
@@ -33,7 +33,7 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - **Desplegada en:** https://dpdb13.github.io/playstats-basketball/
 - **Nombre oficial:** PlayStats Basketball
 - **Service Worker:** Auto-actualización implementada (detecta nueva versión y recarga automáticamente)
-- **Cache actual:** `basketball-rotation-v28`
+- **Cache actual:** `basketball-rotation-v35`
 - **Manifest:** `orientation: "any"` (permite horizontal y vertical)
 - **History API:** pushState/popstate para navegación nativa de back en iOS/Android
 - **Supabase schema:** Columna `team_settings JSONB` en tabla `teams` para posiciones configurables
@@ -314,6 +314,22 @@ Cada evento vinculado al quinteto que estaba jugando → permite correlaciones p
 - Función `get_team_by_invite_code` existe en Supabase pero no está en `supabase-schema.sql` versionado
 
 ## Historial de conversaciones
+
+### 8 febrero 2026 - Sesión 16: FT Flow + Cancel + Score Display + Team Positions v35
+- **Flujo FT reordenado**: 1PT → ¿Quién? → ¿Cuántos Free Throws? → ¿Cuántos anotó? (colores neutros slate, no verde/rojo)
+- **Nuevo modal**: `freeThrowMade` añadido al sistema de `activeModal`
+- **Botón Cancel**: añadido junto a Back en todos los pasos del flujo de scoring y FT. `cancelScoring()` helper resetea todo
+- **Score display en TeamDetail**: nombres de equipo en `text-slate-300` (muted), marcadores en `font-black text-white` (prominent)
+- **Partidos finalizados**: nombres con opacidad reducida del color victoria/derrota, scores con color completo
+- **Editor de posiciones en creación de equipo**: inline en TeamsList con barras de color, add/remove/rename
+- **`createTeam()` actualizado**: acepta `positions` opcional, guarda en `team_settings.positions` via UPDATE separado (INSERT no acepta columnas añadidas con ALTER TABLE)
+- **Jugadores distribuidos round-robin** entre las posiciones elegidas al crear equipo
+- **"Free Throws" capitalizado** en EN y ES (basketball term)
+- **Bug fix**: Supabase INSERT rechazaba `team_settings` → separado en INSERT + UPDATE
+- **Lección aprendida**: PostgREST INSERT puede fallar con columnas añadidas por ALTER TABLE aunque UPDATE funcione → siempre INSERT básico + UPDATE separado
+- Traducciones: +2 keys (teamPositions, Free Throws capitalizado)
+- QA: 2 reviews Opus adversarial, 0 bugs funcionales en primera, 1 bug DB en segunda (corregido)
+- Cache v32→v35, desplegado a GitHub Pages
 
 ### 8 febrero 2026 - Sesión 15: Color Picker + Shot Stats + Rival Made/Missed + PlayerCard v28
 

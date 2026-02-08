@@ -94,14 +94,21 @@ export function TeamProvider({ children }) {
     if (!user) return null;
 
     try {
-      const teamSettings = positions ? { positions } : {};
       const { data: team, error: teamError } = await supabase
         .from('teams')
-        .insert({ name, icon, created_by: user.id, team_settings: teamSettings })
+        .insert({ name, icon, created_by: user.id })
         .select()
         .single();
 
       if (teamError) throw teamError;
+
+      // Save custom positions if provided (update separately — insert doesn't support team_settings)
+      if (positions) {
+        await supabase
+          .from('teams')
+          .update({ team_settings: { positions } })
+          .eq('id', team.id);
+      }
 
       // Anadir al creador como owner
       const { error: memberError } = await supabase
