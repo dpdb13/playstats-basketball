@@ -2,7 +2,7 @@
   "name": "PlayStats Basketball",
   "short_name": "PlayStats",
   "description": "App para gestionar rotaciones y estadísticas de baloncesto",
-  "start_url": "./",
+  "start_url": "/playstats-basketball/",
   "display": "standalone",
   "background_color": "#111827",
   "theme_color": "#f97316",
