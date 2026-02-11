@@ -1,4 +1,4 @@
-const CACHE_NAME = 'basketball-rotation-v60';
+const CACHE_NAME = 'basketball-rotation-v61';
 const urlsToCache = [
   '/playstats-basketball/',
   '/playstats-basketball/index.html'
