@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TeamProvider, useTeam } from './context/TeamContext';
 import { LanguageProvider, useTranslation } from './context/LanguageContext';
-import Auth from './components/Auth';
+import Auth, { UpdatePasswordForm } from './components/Auth';
 import TeamsList from './components/TeamsList';
 import TeamDetail from './components/TeamDetail';
 import BasketballRotationTracker from './BasketballRotationTracker';
@@ -40,7 +40,7 @@ class ErrorBoundary extends React.Component {
 }
 
 function AppContent() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, passwordRecovery } = useAuth();
   const { currentTeam, teamPlayers, saveGame, refreshCurrentTeam, selectTeam, deselectTeam } = useTeam();
   const { t } = useTranslation();
   const [activeGame, setActiveGame] = useState(null); // null = no game, object = playing
@@ -51,30 +51,50 @@ function AppContent() {
   // ============================================
   // HISTORY API — push/pop state for native back navigation
   // ============================================
+
+  // Track previous screen to detect forward navigation (push) vs same-screen updates (replace)
+  const prevScreenRef = useRef('teams');
+
   const getCurrentScreen = useCallback(() => {
     if (activeGame) return 'game';
     if (currentTeam) return 'teamDetail';
     return 'teams';
   }, [activeGame, currentTeam]);
 
-  // Push state when screen changes
+  // Manage history entries: push on forward navigation, replace on same-screen updates
   useEffect(() => {
     const screen = getCurrentScreen();
-    // Only push if the current history state doesn't match
-    const currentState = window.history.state?.screen;
-    if (currentState !== screen) {
-      window.history.pushState({ screen, teamId: currentTeam?.id }, '');
+    const prev = prevScreenRef.current;
+    prevScreenRef.current = screen;
+
+    const stateData = { screen, teamId: currentTeam?.id };
+
+    // Screen order: teams(0) → teamDetail(1) → game(2)
+    const screenOrder = { teams: 0, teamDetail: 1, game: 2 };
+    const isForward = screenOrder[screen] > screenOrder[prev];
+
+    if (isForward) {
+      // Forward navigation: push a new entry so back button can pop it
+      window.history.pushState(stateData, '');
+    } else {
+      // Same screen or backward: just update current entry
+      window.history.replaceState(stateData, '');
     }
   }, [getCurrentScreen, currentTeam]);
 
+  // Debounce rapid back presses — prevents double-navigation before React re-renders
+  const navGuardRef = useRef(false);
+
   // Listen for popstate (back button / back gesture)
   useEffect(() => {
-    const handlePopState = (e) => {
-      const state = e.state;
+    const handlePopState = () => {
+      // Debounce: skip if we're already processing a navigation
+      if (navGuardRef.current) return;
+      navGuardRef.current = true;
+      requestAnimationFrame(() => { navGuardRef.current = false; });
 
-      // If we're in a game, show exit confirmation instead of navigating
+      // If we're in a game, block navigation and show exit confirmation
       if (activeGame) {
-        // Push state back so the user stays on the page
         window.history.pushState({ screen: 'game', teamId: currentTeam?.id }, '');
         setShowExitConfirm(true);
         return;
@@ -86,7 +106,8 @@ function AppContent() {
         return;
       }
 
-      // If we're already at teams list, push state to prevent leaving the app
+      // At teams list: re-push to prevent leaving the PWA
+      // (only one extra entry, not infinite — the previous push was consumed by popstate)
       window.history.pushState({ screen: 'teams' }, '');
     };
 
@@ -134,6 +155,10 @@ function AppContent() {
 
   // Salir del partido y volver al detalle del equipo
   const handleExitGame = useCallback(() => {
+    // Block the popstate handler from firing when we programmatically go back
+    navGuardRef.current = true;
+    window.history.back(); // consume the entry pushed when entering the game
+    requestAnimationFrame(() => { navGuardRef.current = false; });
     setActiveGame(null);
     refreshCurrentTeam();
   }, [refreshCurrentTeam]);
@@ -161,6 +186,11 @@ function AppContent() {
     return <Auth />;
   }
 
+  // Si viene de un link de recuperacion -> forzar cambio de contraseña
+  if (passwordRecovery) {
+    return <UpdatePasswordForm />;
+  }
+
   // Si hay partido activo -> Tracker
   if (activeGame) {
     return (
@@ -173,6 +203,7 @@ function AppContent() {
         teamId={currentTeam?.id}
         userId={user?.id}
         teamName={currentTeam?.name}
+        teamShortName={currentTeam?.team_settings?.short_name || null}
         showExitConfirm={showExitConfirm}
         onDismissExitConfirm={() => setShowExitConfirm(false)}
       />

@@ -3,6 +3,98 @@ import { useAuth } from '../context/AuthContext';
 import { useTranslation } from '../context/LanguageContext';
 import PlayStatsIcon from './PlayStatsIcon';
 
+export function UpdatePasswordForm() {
+  const { updatePassword } = useAuth();
+  const { t } = useTranslation();
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (newPassword.length < 6) {
+      setError(t.passwordMinLength || 'Password must be at least 6 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError(t.passwordsDoNotMatch || 'Passwords do not match');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await updatePassword(newPassword);
+    } catch (err) {
+      setError(err.message || t.unexpectedError);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-4">
+      <div className="bg-slate-800 rounded-2xl p-6 sm:p-8 md:p-10 border-2 border-orange-500 max-w-md w-full">
+        <div className="flex items-center justify-center gap-2 mb-6">
+          <PlayStatsIcon className="w-8 h-8 text-orange-500" />
+          <h1 className="text-xl sm:text-2xl font-black text-orange-400">PlayStats Basketball</h1>
+        </div>
+
+        <h2 className="text-lg font-bold text-center mb-6 text-slate-300">
+          {t.setNewPassword || 'Set new password'}
+        </h2>
+
+        {error && (
+          <div className="bg-red-900/50 border border-red-500 rounded-lg p-3 mb-4 text-sm text-red-300">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-slate-400 mb-1">
+              {t.newPassword || 'New password'}
+            </label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white focus:border-orange-500 focus:outline-none"
+              placeholder={t.minSixChars}
+              required
+              minLength={6}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-400 mb-1">
+              {t.confirmPassword || 'Confirm password'}
+            </label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white focus:border-orange-500 focus:outline-none"
+              placeholder={t.minSixChars}
+              required
+              minLength={6}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-orange-600 hover:bg-orange-500 active:bg-orange-400 py-3 rounded-lg font-bold text-lg disabled:opacity-50"
+          >
+            {loading ? t.loading : (t.savePassword || 'Save password')}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function Auth() {
   const { signIn, signUp, resetPassword } = useAuth();
   const { t } = useTranslation();
@@ -42,7 +134,7 @@ export default function Auth() {
       } else if (msg.includes('Unable to validate email')) {
         setError(t.invalidEmail);
       } else {
-        setError(msg);
+        setError(t.unexpectedError);
       }
     } finally {
       setLoading(false);
