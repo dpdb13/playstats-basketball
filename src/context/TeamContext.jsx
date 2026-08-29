@@ -8,23 +8,9 @@ import {
   addToQueue, processQueue, startSyncListener, isOnline
 } from '../lib/syncManager';
 import { DEFAULT_POSITIONS } from '../lib/gameUtils';
+import { extractAndSaveGameStats } from '../lib/statsExtractor';
 
 const TeamContext = createContext({});
-
-const DEFAULT_PLAYERS = [
-  { name: 'Player 1', number: '1', position: 'Base' },
-  { name: 'Player 2', number: '2', position: 'Base' },
-  { name: 'Player 3', number: '3', position: 'Base' },
-  { name: 'Player 4', number: '4', position: 'Base' },
-  { name: 'Player 5', number: '5', position: 'Base' },
-  { name: 'Player 6', number: '6', position: 'Alero' },
-  { name: 'Player 7', number: '7', position: 'Alero' },
-  { name: 'Player 8', number: '8', position: 'Alero' },
-  { name: 'Player 9', number: '9', position: 'Joker' },
-  { name: 'Player 10', number: '10', position: 'Joker' },
-  { name: 'Player 11', number: '11', position: 'Joker' },
-  { name: 'Player 12', number: '0', position: 'Unselected' },
-];
 
 export function TeamProvider({ children }) {
   const { user } = useAuth();
@@ -55,6 +41,7 @@ export function TeamProvider({ children }) {
   }, []);
 
   // Cargar equipos del usuario
+  // team_settings se carga por separado para que un fallo de schema cache no rompa toda la lista
   const loadTeams = useCallback(async () => {
     if (!user) return;
     setLoading(true);
@@ -63,15 +50,34 @@ export function TeamProvider({ children }) {
       if (isOnline()) {
         const { data, error } = await supabase
           .from('team_members')
-          .select('team_id, role, teams(id, name, icon, invite_code, created_by, team_settings)')
+          .select('team_id, role, teams(id, name, icon, invite_code, created_by)')
           .eq('user_id', user.id);
 
         if (error) throw error;
 
         const teamsData = (data || []).map(tm => ({
           ...tm.teams,
-          role: tm.role
+          role: tm.role,
+          team_settings: {} // default, se carga al seleccionar equipo
         }));
+
+        // Intentar cargar team_settings para todos los equipos (no fatal si falla)
+        try {
+          const teamIds = teamsData.map(t => t.id);
+          const { data: settingsData, error: settingsError } = await supabase
+            .from('teams')
+            .select('id, team_settings')
+            .in('id', teamIds);
+
+          if (!settingsError && settingsData) {
+            const settingsMap = {};
+            settingsData.forEach(t => { settingsMap[t.id] = t.team_settings || {}; });
+            teamsData.forEach(t => { t.team_settings = settingsMap[t.id] || {}; });
+          }
+        } catch {
+          // team_settings not available — teams still work with default positions
+        }
+
         setTeams(teamsData);
         setCachedTeams(teamsData);
       } else {
@@ -89,50 +95,73 @@ export function TeamProvider({ children }) {
     loadTeams();
   }, [loadTeams]);
 
-  // Crear equipo
-  const createTeam = useCallback(async (name, icon = '🏀', positions = null) => {
+  // Crear equipo — operación atómica en 3 pasos críticos + 1 opcional
+  // Paso 1: INSERT team (sin team_settings para evitar schema cache issues)
+  // Paso 2: INSERT team_member (owner) — si falla, se limpia el team
+  // Paso 3: INSERT jugadores por defecto
+  // Paso 4 (opcional): UPDATE team_settings con posiciones custom
+  const createTeam = useCallback(async (name, icon = '🏀', positions = null, shortName = null) => {
     if (!user) return null;
 
-    try {
-      const { data: team, error: teamError } = await supabase
-        .from('teams')
-        .insert({ name, icon, created_by: user.id })
-        .select()
-        .single();
+    const teamId = crypto.randomUUID();
 
+    try {
+      // Paso 1: Crear equipo
+      const { error: teamError } = await supabase
+        .from('teams')
+        .insert({ id: teamId, name, icon, created_by: user.id });
       if (teamError) throw teamError;
 
-      // Save custom positions if provided (update separately — insert doesn't support team_settings)
-      if (positions) {
-        await supabase
-          .from('teams')
-          .update({ team_settings: { positions } })
-          .eq('id', team.id);
-      }
-
-      // Anadir al creador como owner
+      // Paso 2: Añadir creador como owner (necesario para que RLS permita las queries siguientes)
       const { error: memberError } = await supabase
         .from('team_members')
-        .insert({ team_id: team.id, user_id: user.id, role: 'owner' });
-
+        .insert({ team_id: teamId, user_id: user.id, role: 'owner' });
       if (memberError) throw memberError;
 
-      // Crear jugadores por defecto, distribuidos entre las posiciones elegidas
+      // Paso 3: Crear jugadores por defecto distribuidos entre posiciones
       const effectivePositions = positions || DEFAULT_POSITIONS;
       const playersToInsert = Array.from({ length: 12 }, (_, i) => ({
-        team_id: team.id,
+        team_id: teamId,
         name: `Player ${i + 1}`,
         number: String(i === 11 ? 0 : i + 1),
         position: i < 11 ? effectivePositions[i % effectivePositions.length] : 'Unselected',
         sort_order: i
       }));
+      const { error: playersError } = await supabase.from('team_players').insert(playersToInsert);
+      if (playersError) console.error('createTeam: players insert failed:', playersError);
 
-      await supabase.from('team_players').insert(playersToInsert);
+      // Paso 4 (opcional): Guardar team_settings (posiciones custom + short_name + viewer_invite_code)
+      // No es fatal si falla — los jugadores ya tienen sus posiciones asignadas,
+      // y el equipo usará DEFAULT_POSITIONS hasta que se configure desde TeamDetail
+      const settings = {};
+      if (positions) settings.positions = positions;
+      if (shortName) settings.short_name = shortName;
+      // Generate viewer invite code automatically
+      settings.viewer_invite_code = Array.from(crypto.getRandomValues(new Uint8Array(6)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      if (Object.keys(settings).length > 0) {
+        try {
+          const { error: settingsError } = await supabase
+            .from('teams')
+            .update({ team_settings: settings })
+            .eq('id', teamId);
+          if (settingsError) console.error('createTeam: team_settings update failed:', settingsError);
+        } catch {
+          // Schema cache issue — team still works
+        }
+      }
 
       await loadTeams();
-      return team;
+
+      return {
+        id: teamId, name, icon, created_by: user.id,
+        role: 'owner',
+        team_settings: settings
+      };
     } catch (err) {
-      console.error('Error creando equipo:', err);
+      // Limpiar equipo huérfano si se creó pero falló un paso crítico
+      try { await supabase.from('teams').delete().eq('id', teamId); } catch { /* best effort */ }
+      console.error('createTeam failed:', err);
       throw err;
     }
   }, [user, loadTeams]);
@@ -150,6 +179,24 @@ export function TeamProvider({ children }) {
 
     try {
       if (isOnline()) {
+        // Cargar team_settings fresco si no lo tenemos (no fatal)
+        if (!team.team_settings || Object.keys(team.team_settings).length === 0) {
+          try {
+            const { data: freshTeam } = await supabase
+              .from('teams')
+              .select('team_settings')
+              .eq('id', team.id)
+              .single();
+            if (freshTeam?.team_settings) {
+              const enrichedTeam = { ...team, team_settings: freshTeam.team_settings };
+              setCurrentTeam(enrichedTeam);
+              team = enrichedTeam;
+            }
+          } catch {
+            // team_settings unavailable — will use DEFAULT_POSITIONS
+          }
+        }
+
         // Cargar jugadores
         const { data: players, error: playersError } = await supabase
           .from('team_players')
@@ -171,6 +218,23 @@ export function TeamProvider({ children }) {
         if (gamesError) throw gamesError;
         setTeamGames(games || []);
         setCachedGames(team.id, games || []);
+
+        // Auto-purge games deleted more than 7 days ago
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const toDelete = (games || []).filter(g => {
+          if (g.status !== 'deleted') return false;
+          const deletedAt = g.game_data?.deleted_at;
+          return deletedAt && new Date(deletedAt).getTime() < sevenDaysAgo;
+        });
+        if (toDelete.length > 0) {
+          const deletedIds = toDelete.map(g => g.id);
+          const purgedGames = (games || []).filter(g => !deletedIds.includes(g.id));
+          setTeamGames(purgedGames);
+          setCachedGames(team.id, purgedGames);
+          // Batch delete from DB in background
+          supabase.from('games').delete().in('id', deletedIds)
+            .then(({ error }) => { if (error) console.error('Purge failed:', error); });
+        }
 
         // Suscripcion Realtime para cambios en partidos de este equipo
         const channel = supabase
@@ -237,7 +301,7 @@ export function TeamProvider({ children }) {
     setTeamGames([]);
   }, []);
 
-  // Unirse a equipo por codigo
+  // Unirse a equipo por codigo (editor)
   const joinTeam = useCallback(async (code) => {
     if (!user) throw new Error('No autenticado');
 
@@ -248,7 +312,25 @@ export function TeamProvider({ children }) {
     return data;
   }, [user, loadTeams]);
 
-  // Generar nuevo codigo de invitacion
+  // Unirse a equipo como viewer
+  const joinTeamAsViewer = useCallback(async (code) => {
+    if (!user) throw new Error('No autenticado');
+
+    const { data, error } = await supabase.rpc('join_team_as_viewer', { code });
+    if (error) throw error;
+
+    await loadTeams();
+    return data;
+  }, [user, loadTeams]);
+
+  // Obtener info de equipo por codigo de viewer (sin ser miembro)
+  const getTeamByViewerCode = useCallback(async (code) => {
+    const { data, error } = await supabase.rpc('get_team_by_viewer_code', { code });
+    if (error) throw error;
+    return data?.[0] || null;
+  }, []);
+
+  // Generar nuevo codigo de invitacion (editor)
   const regenerateInviteCode = useCallback(async (teamId) => {
     const newCode = Array.from(crypto.getRandomValues(new Uint8Array(6)))
       .map(b => b.toString(16).padStart(2, '0')).join('');
@@ -262,6 +344,67 @@ export function TeamProvider({ children }) {
     await loadTeams();
     return newCode;
   }, [loadTeams]);
+
+  // Generar nuevo codigo de invitacion (viewer)
+  const regenerateViewerCode = useCallback(async (teamId) => {
+    const newCode = Array.from(crypto.getRandomValues(new Uint8Array(6)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // Read fresh settings from DB to avoid overwriting concurrent changes
+    let freshSettings = {};
+    try {
+      const { data: freshTeam } = await supabase
+        .from('teams')
+        .select('team_settings')
+        .eq('id', teamId)
+        .single();
+      freshSettings = freshTeam?.team_settings || {};
+    } catch {
+      // Fall back to local state if read fails
+      const team = teams.find(t => t.id === teamId);
+      freshSettings = { ...(team?.team_settings || {}) };
+    }
+
+    const settings = { ...freshSettings, viewer_invite_code: newCode };
+
+    const { error } = await supabase
+      .from('teams')
+      .update({ team_settings: settings })
+      .eq('id', teamId);
+
+    if (error) throw error;
+
+    // Update local state
+    setTeams(prev => prev.map(t => t.id === teamId ? { ...t, team_settings: settings } : t));
+    if (currentTeam?.id === teamId) {
+      setCurrentTeam(prev => ({ ...prev, team_settings: settings }));
+    }
+
+    return newCode;
+  }, [teams, currentTeam]);
+
+  // Obtener miembros del equipo con info
+  const getTeamMembers = useCallback(async (teamId) => {
+    const { data, error } = await supabase.rpc('get_team_members_info', { p_team_id: teamId });
+    if (error) throw error;
+    return data || [];
+  }, []);
+
+  // Cambiar rol de un miembro
+  const updateMemberRole = useCallback(async (teamId, userId, role) => {
+    const { error } = await supabase.rpc('update_member_role', {
+      p_team_id: teamId, p_user_id: userId, p_role: role
+    });
+    if (error) throw error;
+  }, []);
+
+  // Eliminar un miembro del equipo
+  const removeMember = useCallback(async (teamId, userId) => {
+    const { error } = await supabase.rpc('remove_team_member', {
+      p_team_id: teamId, p_user_id: userId
+    });
+    if (error) throw error;
+  }, []);
 
   // CRUD de jugadores del roster
   const addPlayer = useCallback(async (player) => {
@@ -342,6 +485,13 @@ export function TeamProvider({ children }) {
           .upsert(gameRecord);
 
         if (error) throw error;
+
+        // Fire-and-forget: extraer stats si el partido está completado
+        if (gameRecord.status === 'completed') {
+          extractAndSaveGameStats(gameRecord).catch(err =>
+            console.error('Stats extraction failed:', err)
+          );
+        }
       } catch {
         addToQueue({ type: 'upsert_game', data: gameRecord });
       }
@@ -364,6 +514,84 @@ export function TeamProvider({ children }) {
     });
   }, [currentTeam, user]);
 
+  // Soft delete: move game to trash (status='deleted', store deleted_at in game_data)
+  const softDeleteGame = useCallback(async (gameId) => {
+    if (!currentTeam) return;
+
+    const game = teamGames.find(g => g.id === gameId);
+    if (!game) return;
+
+    const previousStatus = game.status;
+    const updatedGameData = { ...(game.game_data || {}), deleted_at: new Date().toISOString(), previous_status: previousStatus };
+
+    const updateRecord = {
+      status: 'deleted',
+      game_data: updatedGameData,
+      updated_at: new Date().toISOString()
+    };
+
+    if (isOnline()) {
+      try {
+        const { error } = await supabase
+          .from('games')
+          .update(updateRecord)
+          .eq('id', gameId);
+        if (error) throw error;
+      } catch (err) {
+        console.error('Error soft-deleting game:', err);
+        addToQueue({ type: 'update_game', data: { id: gameId, ...updateRecord } });
+      }
+    } else {
+      addToQueue({ type: 'update_game', data: { id: gameId, ...updateRecord } });
+    }
+
+    setTeamGames(prev => {
+      const updated = prev.map(g => g.id === gameId ? { ...g, status: 'deleted', game_data: updatedGameData } : g);
+      setCachedGames(currentTeam.id, updated);
+      return updated;
+    });
+  }, [currentTeam, teamGames]);
+
+  // Restore game from trash
+  const restoreGame = useCallback(async (gameId) => {
+    if (!currentTeam) return;
+
+    const game = teamGames.find(g => g.id === gameId);
+    if (!game) return;
+
+    const gameData = game.game_data || {};
+    const restoredStatus = gameData.previous_status || 'completed';
+    const { deleted_at, previous_status, ...cleanGameData } = gameData;
+
+    const updateRecord = {
+      status: restoredStatus,
+      game_data: cleanGameData,
+      updated_at: new Date().toISOString()
+    };
+
+    if (isOnline()) {
+      try {
+        const { error } = await supabase
+          .from('games')
+          .update(updateRecord)
+          .eq('id', gameId);
+        if (error) throw error;
+      } catch (err) {
+        console.error('Error restoring game:', err);
+        addToQueue({ type: 'update_game', data: { id: gameId, ...updateRecord } });
+      }
+    } else {
+      addToQueue({ type: 'update_game', data: { id: gameId, ...updateRecord } });
+    }
+
+    setTeamGames(prev => {
+      const updated = prev.map(g => g.id === gameId ? { ...g, status: restoredStatus, game_data: cleanGameData } : g);
+      setCachedGames(currentTeam.id, updated);
+      return updated;
+    });
+  }, [currentTeam, teamGames]);
+
+  // Permanent delete (from trash or direct)
   const deleteGame = useCallback(async (gameId) => {
     if (!currentTeam) return;
 
@@ -388,11 +616,12 @@ export function TeamProvider({ children }) {
     });
   }, [currentTeam]);
 
+
   // Obtener info de equipo por codigo de invitacion (sin ser miembro)
   const getTeamByInviteCode = useCallback(async (code) => {
     const { data, error } = await supabase.rpc('get_team_by_invite_code', { code });
     if (error) throw error;
-    return data;
+    return data?.[0] || null;
   }, []);
 
   // Actualizar equipo (nombre, icono)
@@ -418,7 +647,10 @@ export function TeamProvider({ children }) {
       .update({ team_settings: settings })
       .eq('id', teamId);
 
-    if (error) throw error;
+    if (error) {
+      console.error('updateTeamSettings failed:', error);
+      throw error;
+    }
 
     setTeams(prev => prev.map(t => t.id === teamId ? { ...t, team_settings: settings } : t));
     if (currentTeam?.id === teamId) {
@@ -470,15 +702,31 @@ export function TeamProvider({ children }) {
     }
   }, [currentTeam, selectTeam]);
 
+  // Auto-refresh when app returns to foreground (fixes multi-device sync)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible' || !isOnline()) return;
+      if (currentTeam) {
+        selectTeam(currentTeam);
+      } else {
+        loadTeams();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [currentTeam, selectTeam, loadTeams]);
+
   return (
     <TeamContext.Provider value={{
       teams, currentTeam, teamPlayers, teamGames,
       loading, online,
       loadTeams, createTeam, selectTeam, deselectTeam, deleteTeam,
-      joinTeam, regenerateInviteCode, getTeamByInviteCode,
+      joinTeam, joinTeamAsViewer, regenerateInviteCode, regenerateViewerCode,
+      getTeamByInviteCode, getTeamByViewerCode,
+      getTeamMembers, updateMemberRole, removeMember,
       updateTeam, updateTeamSettings, uploadTeamAvatar,
       addPlayer, updatePlayer, deletePlayer,
-      saveGame, deleteGame, refreshCurrentTeam
+      saveGame, deleteGame, softDeleteGame, restoreGame, refreshCurrentTeam
     }}>
       {children}
     </TeamContext.Provider>

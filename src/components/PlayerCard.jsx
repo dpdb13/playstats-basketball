@@ -224,7 +224,7 @@ const PlayerCard = memo(({
         <button
           onClick={() => onToggleCourt(player.id)}
           disabled={isFouledOut || isUnselected || (isRosterView && player.onCourt)}
-          className={`min-h-[44px] min-w-[44px] px-2 rounded-lg font-bold text-xs flex-shrink-0 ${isFouledOut || isUnselected || (isRosterView && player.onCourt) ? 'bg-slate-600 opacity-50' : player.onCourt ? 'bg-rose-500 active:bg-rose-400' : 'bg-emerald-500 active:bg-emerald-400'}`}
+          className={`min-h-[44px] min-w-[44px] px-2 rounded-lg font-bold text-xs flex-shrink-0 ${isFouledOut || isUnselected || (isRosterView && player.onCourt) ? 'bg-slate-600 opacity-50' : player.onCourt ? 'bg-orange-500 active:bg-orange-400' : 'bg-emerald-500 active:bg-emerald-400'}`}
         >
           {isUnselected ? t.na : player.onCourt ? t.outBtn : t.inBtn}
         </button>
@@ -237,7 +237,7 @@ const PlayerCard = memo(({
   // ============================================
 
   return (
-    <div className={`rounded-lg p-1.5 sm:p-2 md:p-3 border-3 ${borderClass} ${player.onCourt ? 'bg-slate-700' : isUnselected ? 'bg-slate-700 opacity-50' : 'bg-slate-800'} ${dimClass}`}>
+    <div className={`rounded-lg p-1.5 sm:p-2 md:p-3 border-2 ${borderClass} bg-slate-900 ${isUnselected ? 'opacity-50' : ''} ${dimClass}`}>
       {/* Header: Number + Name (double-tap to edit) */}
       <div className="flex items-center justify-between mb-1 md:mb-1.5">
         <div

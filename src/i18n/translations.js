@@ -60,8 +60,8 @@ export const translations = {
     crossPositionOptions: 'Cross-position options',
 
     // Recommendation reasons
-    foulsDanger: (fouls, quarter) => `FOULS (${fouls}/5 in Q${quarter})`,
-    foulsWarning: (fouls, quarter) => `Fouls (${fouls}/5 in Q${quarter})`,
+    foulsDanger: (fouls, quarterLabel) => `FOULS (${fouls}/5 in ${quarterLabel})`,
+    foulsWarning: (fouls, quarterLabel) => `Fouls (${fouls}/5 in ${quarterLabel})`,
     restReason: (time) => `REST (${time} straight)`,
 
     // Exit modal
@@ -358,6 +358,16 @@ export const translations = {
     seasonTeamByDuration: 'Team avg +/- by stint duration',
     seasonOptimal: 'Optimal',
     seasonFatigue: 'Fatigue',
+    rotationInsightsTitle: 'Rotation Insights',
+    insightMarathoners: 'Trust with long stints',
+    insightSparkPlugs: 'Energy off the bench',
+    insightFatigueRisk: 'Watch for fatigue',
+    insightConsistent: 'Reliable in any role',
+    insightBestAt: 'best at',
+    insightDrops: 'drops',
+    insightPointsFrom: 'pts from',
+    insightStablePerformance: 'stable +/- across all durations',
+    seasonTeamAvg: 'TEAM',
     seasonOffense: 'OFF',
     seasonDefense: 'DEF',
     seasonMinutes: 'MIN',
@@ -366,8 +376,14 @@ export const translations = {
     seasonNoDataViewer: 'Stats haven\'t been processed yet',
     seasonNoDataViewerHint: 'An editor needs to open the Stats tab to process game stats',
     seasonBackfilling: 'Processing game stats...',
+    seasonReprocess: 'Reprocess all stats',
     seasonLowSample: 'With fewer than 5 games the data may not be very representative. The more games, the more reliable the stats.',
     seasonImpactSimpleExplain: 'Score change across the season when this player is on court vs off court.',
+    // Overtime
+    overtimeConfirmTitle: 'Overtime',
+    overtimeConfirmText: 'Tie at end of period. Play overtime?',
+    overtimeYes: 'Yes, overtime',
+    overtimeNo: 'No, end game',
   },
 
   es: {
@@ -427,8 +443,8 @@ export const translations = {
     crossPositionOptions: 'Opciones cambiando posición',
 
     // Recommendation reasons
-    foulsDanger: (fouls, quarter) => `FALTAS (${fouls}/5 en Q${quarter})`,
-    foulsWarning: (fouls, quarter) => `Faltas (${fouls}/5 en Q${quarter})`,
+    foulsDanger: (fouls, quarterLabel) => `FALTAS (${fouls}/5 en ${quarterLabel})`,
+    foulsWarning: (fouls, quarterLabel) => `Faltas (${fouls}/5 en ${quarterLabel})`,
     restReason: (time) => `DESCANSO (${time} seguidos)`,
 
     // Exit modal
@@ -725,6 +741,16 @@ export const translations = {
     seasonTeamByDuration: 'Media +/- del equipo por duración de stint',
     seasonOptimal: 'Óptimo',
     seasonFatigue: 'Fatiga',
+    rotationInsightsTitle: 'Claves de rotación',
+    insightMarathoners: 'Confianza en stints largos',
+    insightSparkPlugs: 'Energía desde el banquillo',
+    insightFatigueRisk: 'Ojo con la fatiga',
+    insightConsistent: 'Fiables en cualquier rol',
+    insightBestAt: 'mejor en',
+    insightDrops: 'cae',
+    insightPointsFrom: 'pts de',
+    insightStablePerformance: '+/- estable en todas las duraciones',
+    seasonTeamAvg: 'EQUIPO',
     seasonOffense: 'OF',
     seasonDefense: 'DEF',
     seasonMinutes: 'MIN',
@@ -733,7 +759,13 @@ export const translations = {
     seasonNoDataViewer: 'Las stats aún no se han procesado',
     seasonNoDataViewerHint: 'Un editor necesita abrir la pestaña Stats para procesar las estadísticas',
     seasonBackfilling: 'Procesando estadísticas de partidos...',
+    seasonReprocess: 'Reprocesar todas las stats',
     seasonLowSample: 'Con menos de 5 partidos los datos no son muy representativos. A más partidos, más fiables serán las estadísticas.',
     seasonImpactSimpleExplain: 'Cambio en el marcador acumulado en la temporada cuando este jugador está en pista vs fuera de pista.',
+    // Overtime
+    overtimeConfirmTitle: 'Prórroga',
+    overtimeConfirmText: 'Empate al final del periodo. ¿Jugar prórroga?',
+    overtimeYes: 'Sí, prórroga',
+    overtimeNo: 'No, fin del partido',
   }
 };

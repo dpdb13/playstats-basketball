@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Undo2, RefreshCw, Bell, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
+import { Users, Play, Pause, AlertTriangle, XCircle, Settings, Download, Undo2, RefreshCw, Bell, ChevronDown, ChevronUp, Eye, EyeOff, BarChart3 } from 'lucide-react';
 import PlayStatsIcon from './components/PlayStatsIcon';
 import { addToQueue } from './lib/syncManager';
-import { formatTime, formatGameTime, getFoulStatus, getFoulBgClass, getQuintetKey, createInitialPlayerState, createInitialPartialScores, TEAM_COLORS, getTeamColor } from './lib/gameUtils';
+import { formatTime, formatGameTime, getFoulStatus, getFoulBgClass, getQuintetKey, createInitialPlayerState, createInitialPartialScores, createPartialEntry, getQuarterDuration, getQuarterLabel, isOvertime, TEAM_COLORS, getTeamColor } from './lib/gameUtils';
 import { generateReport as generateReportHTML } from './lib/generateReport';
+import GameReport from './components/GameReport';
 import PlayerCard from './components/PlayerCard';
 import { useTranslation } from './context/LanguageContext';
 
@@ -19,7 +20,7 @@ const generateGameId = () => crypto.randomUUID();
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
-export default function BasketballRotationTracker({ initialPlayers, onExit, onGameSaved, savedGameData, teamId, userId, showExitConfirm, onDismissExitConfirm, teamName }) {
+export default function BasketballRotationTracker({ initialPlayers, onExit, onGameSaved, savedGameData, teamId, userId, showExitConfirm, onDismissExitConfirm, teamName, teamShortName }) {
   // Jugadores: usar initialPlayers prop
   const effectivePlayers = initialPlayers || [];
 
@@ -46,6 +47,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
 
   // Estados de UI
   const [showQuarterSelector, setShowQuarterSelector] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [selectedPoints, setSelectedPoints] = useState(null);
   const [selectedScorePlayer, setSelectedScorePlayer] = useState(null); // {id, isRival} for 2-step scoring
   const [editingTeam, setEditingTeam] = useState(null);
@@ -66,6 +68,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   // Equipos y marcador
   const [homeTeam, setHomeTeam] = useState(() => savedGameData?.homeTeam || 'Home');
   const [awayTeam, setAwayTeam] = useState(() => savedGameData?.awayTeam || 'Away');
+  const [homeTeamShort, setHomeTeamShort] = useState(() => savedGameData?.homeTeamShort || null);
+  const [awayTeamShort, setAwayTeamShort] = useState(() => savedGameData?.awayTeamShort || null);
   const [ourTeamColorId, setOurTeamColorId] = useState(() => savedGameData?.ourTeamColorId || 'orange');
   const [rivalTeamColorId, setRivalTeamColorId] = useState(() => savedGameData?.rivalTeamColorId || 'sky');
   const [homeScore, setHomeScore] = useState(() => savedGameData?.homeScore ?? 0);
@@ -87,6 +91,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   // Refs
   const longPressTimer = useRef(null);
   const gameStateRef = useRef(null);
+  const isFinishingRef = useRef(false);
 
   // i18n + UI states
   const { t, language, toggleLanguage } = useTranslation();
@@ -102,18 +107,28 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const [setupOurColor, setSetupOurColor] = useState('orange');
   const [setupRivalColor, setSetupRivalColor] = useState('sky');
   const [setupRivalName, setSetupRivalName] = useState('');
+  const [setupRivalShortName, setSetupRivalShortName] = useState('');
 
   // Rival scoring step
   const [rivalScoringStep, setRivalScoringStep] = useState(null); // null or 'madeMissed'
+  const [rivalFreeThrowCount, setRivalFreeThrowCount] = useState(null); // for rival FT flow
+
+  // Team fouls per quarter (resets each quarter)
+  const [teamFoulsByQuarter, setTeamFoulsByQuarter] = useState(() => savedGameData?.teamFoulsByQuarter || { 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } });
 
   // Show exit modal when back button/gesture triggers from App
   useEffect(() => {
     if (showExitConfirm) {
-      setActiveModal('exit');
-      setPendingReplacement(null);
+      // If viewing report, close report instead of showing exit modal
+      if (showReport) {
+        setShowReport(false);
+      } else {
+        setActiveModal('exit');
+        setPendingReplacement(null);
+      }
       onDismissExitConfirm();
     }
-  }, [showExitConfirm, onDismissExitConfirm]);
+  }, [showExitConfirm, onDismissExitConfirm, showReport]);
 
   // ============================================
   // AUTOGUARDADO Y RECUPERACIÓN
@@ -191,7 +206,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     }
   }, [effectivePlayers, onGameSaved, t, teamName]);
 
-  const createNewGameWithColors = useCallback((isHome, ourColorId, rivalColorId, ourName, rivalName) => {
+  const createNewGameWithColors = useCallback((isHome, ourColorId, rivalColorId, ourName, rivalName, ourShortName, rivalShortName) => {
     const newId = generateGameId();
 
     setCurrentGameId(newId);
@@ -206,6 +221,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     const resolvedAwayTeam = isHome ? rivalName : ourName;
     setHomeTeam(resolvedHomeTeam);
     setAwayTeam(resolvedAwayTeam);
+    setHomeTeamShort(isHome ? (ourShortName || null) : (rivalShortName || null));
+    setAwayTeamShort(isHome ? (rivalShortName || null) : (ourShortName || null));
     setOurTeamColorId(ourColorId);
     setRivalTeamColorId(rivalColorId);
     setHomeScore(0);
@@ -221,12 +238,15 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setBiggestLead({ us: 0, them: 0 });
     setPartialScores(createInitialPartialScores());
     setEventLog([]);
+    setTeamFoulsByQuarter({ 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } });
+    setRivalFreeThrowCount(null);
     // Reset setup state
     setSetupStep(1);
     setSetupIsHome(null);
     setSetupOurColor('orange');
     setSetupRivalColor('sky');
     setSetupRivalName('');
+    setSetupRivalShortName('');
 
     setCurrentScreen('game');
 
@@ -278,6 +298,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     benchIntervals,
     homeTeam,
     awayTeam,
+    homeTeamShort,
+    awayTeamShort,
     ourTeamColorId,
     rivalTeamColorId,
     homeScore,
@@ -293,14 +315,15 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     biggestLead,
     partialScores,
     eventLog,
+    teamFoulsByQuarter,
     savedAt: Date.now()
   }), [
     currentGameId, gameStarted, isHomeTeam, players, gameTime, currentQuarter,
-    intervals, benchIntervals, homeTeam, awayTeam, ourTeamColorId, rivalTeamColorId,
-    homeScore, awayScore,
+    intervals, benchIntervals, homeTeam, awayTeam, homeTeamShort, awayTeamShort,
+    ourTeamColorId, rivalTeamColorId, homeScore, awayScore,
     rotationHistory, actionHistory, quintetHistory, currentQuintet,
     substitutionsByQuarter, scoresByQuarter, leadChanges, ties, biggestLead, partialScores,
-    eventLog
+    eventLog, teamFoulsByQuarter
   ]);
 
   // Keep gameStateRef in sync with latest state
@@ -325,6 +348,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
 
   // Finalizar partido y volver
   const finishGame = useCallback(async () => {
+    isFinishingRef.current = true;
     const gameState = getFullGameState();
     gameState.status = 'completed';
     if (onGameSaved) await onGameSaved(gameState);
@@ -345,7 +369,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     if (!isInitialized || !currentGameId || currentScreen !== 'game') return;
 
     const interval = setInterval(() => {
-      if (onGameSaved && gameStateRef.current) {
+      if (onGameSaved && gameStateRef.current && !isFinishingRef.current) {
         const state = gameStateRef.current();
         state.status = 'in_progress';
         onGameSaved(state).catch(err => console.error('Error in autosave to Supabase:', err));
@@ -450,11 +474,20 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   }, [intervals]);
 
   const getBenchTimeStatus = useCallback((player) => {
-    // Player never been on court yet → green (no urgency at game start)
-    if (player.totalCourtTime === 0 && !player.lastToggle) return 'green';
     const currentMins = player.currentMinutes;
     const redLimit = benchIntervals.red.minutes + benchIntervals.red.seconds / 60;
     const yellowLimit = benchIntervals.yellow.minutes + benchIntervals.yellow.seconds / 60;
+
+    // Player waiting on bench (never been on court): green → yellow → red
+    // The longer they wait without playing, the more urgent it is to put them in.
+    if (player.totalCourtTime === 0 && !player.onCourt) {
+      if (currentMins < redLimit) return 'green';
+      if (currentMins < yellowLimit) return 'yellow';
+      return 'red';
+    }
+
+    // Player resting on bench (came off court): red → yellow → green
+    // They need rest — red means they just sat down, green means rested.
     if (currentMins < redLimit) return 'red';
     if (currentMins < yellowLimit) return 'yellow';
     return 'green';
@@ -463,7 +496,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const getPreviousQuartersTotal = useCallback((team) => {
     let total = 0;
     for (let q = 1; q < currentQuarter; q++) {
-      total += scoresByQuarter[q][team === 'us' ? 'us' : 'them'];
+      total += scoresByQuarter[q]?.[team === 'us' ? 'us' : 'them'] || 0;
     }
     return total;
   }, [currentQuarter, scoresByQuarter]);
@@ -473,40 +506,47 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   // ============================================
   // Ref to track if quarter auto-advance needs quintet snapshot
   const quarterAdvancedRef = useRef(false);
+  // Ref to capture gameTime at 0 BEFORE it resets to 600/300 (for correct quintet duration)
+  const quarterEndGameTimeRef = useRef(0);
+  // State trigger for overtime check (not a ref — useEffect must re-fire even if gameTime stays 0)
+  const [overtimeTrigger, setOvertimeTrigger] = useState(0);
 
   useEffect(() => {
     if (!gameRunning) return;
 
     const interval = setInterval(() => {
-      const now = Date.now();
-
       // Actualizar tiempo de juego
       setGameTime(prev => {
         if (prev <= 0) {
           setGameRunning(false);
           if (currentQuarter < 4) {
+            // Regular quarter advance (Q1→Q2, Q2→Q3, Q3→Q4)
+            quarterEndGameTimeRef.current = prev;
             quarterAdvancedRef.current = true;
             setCurrentQuarter(q => q + 1);
-            return 600;
+            return getQuarterDuration(currentQuarter + 1);
           }
+          // Q4 or OT period ended — check for overtime via separate useEffect
+          setOvertimeTrigger(n => n + 1);
           return 0;
         }
         return prev - 1;
       });
 
-      // Actualizar tiempo de jugadores - OPTIMIZADO
+      // Actualizar tiempo de jugadores — sincronizado con reloj de partido
+      // Cada tick = exactamente 1 segundo de juego (no Date.now())
+      const tickMinutes = 1 / 60;
       setPlayers(prev => {
         let hasChanges = false;
         const updated = prev.map(p => {
           if (p.lastToggle) {
             hasChanges = true;
-            const elapsed = (now - p.lastToggle) / 1000 / 60;
             return {
               ...p,
-              currentMinutes: p.currentMinutes + elapsed,
-              totalCourtTime: p.onCourt ? p.totalCourtTime + elapsed : p.totalCourtTime,
-              totalBenchTime: !p.onCourt ? p.totalBenchTime + elapsed : p.totalBenchTime,
-              lastToggle: now
+              currentMinutes: p.currentMinutes + tickMinutes,
+              totalCourtTime: p.onCourt ? p.totalCourtTime + tickMinutes : p.totalCourtTime,
+              totalBenchTime: !p.onCourt ? p.totalBenchTime + tickMinutes : p.totalBenchTime,
+              lastToggle: true // flag: player is active in game
             };
           }
           return p;
@@ -525,10 +565,14 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   // ============================================
   useEffect(() => {
     if (!gameStarted) return;
+    if (!partialScores[currentQuarter]) return; // guard for OT entry not yet created
 
     const { ourScore, rivalScore } = getCurrentScores();
+    const isOT = isOvertime(currentQuarter);
 
-    if (gameTime <= 300 && !partialScores[currentQuarter].first.locked) {
+    // Regular quarters: lock first half at halftime (300s remaining)
+    // OT periods: no split, skip first-half locking
+    if (!isOT && gameTime <= 300 && !partialScores[currentQuarter].first.locked) {
       setPartialScores(prev => ({
         ...prev,
         [currentQuarter]: {
@@ -542,25 +586,50 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       }));
     }
 
+    // Lock at end of quarter/OT period
     if (gameTime <= 0 && !partialScores[currentQuarter].second.locked) {
-      const firstHalfUs = partialScores[currentQuarter].first.us;
-      const firstHalfThem = partialScores[currentQuarter].first.them;
       const quarterTotalUs = ourScore - getPreviousQuartersTotal('us');
       const quarterTotalThem = rivalScore - getPreviousQuartersTotal('them');
 
-      setPartialScores(prev => ({
-        ...prev,
-        [currentQuarter]: {
-          ...prev[currentQuarter],
-          second: {
-            us: quarterTotalUs - firstHalfUs,
-            them: quarterTotalThem - firstHalfThem,
-            locked: true
+      if (isOT) {
+        // OT: entire period score goes into "first", "second" stays 0-0
+        setPartialScores(prev => ({
+          ...prev,
+          [currentQuarter]: {
+            first: { us: quarterTotalUs, them: quarterTotalThem, locked: true },
+            second: { us: 0, them: 0, locked: true }
           }
-        }
-      }));
+        }));
+      } else {
+        // Regular quarter: second half = total - first half
+        const firstHalfUs = partialScores[currentQuarter].first.us;
+        const firstHalfThem = partialScores[currentQuarter].first.them;
+        setPartialScores(prev => ({
+          ...prev,
+          [currentQuarter]: {
+            ...prev[currentQuarter],
+            second: {
+              us: quarterTotalUs - firstHalfUs,
+              them: quarterTotalThem - firstHalfThem,
+              locked: true
+            }
+          }
+        }));
+      }
     }
   }, [gameTime, currentQuarter, gameStarted, getCurrentScores, getPreviousQuartersTotal, partialScores]);
+
+  // ============================================
+  // OVERTIME CHECK
+  // ============================================
+  useEffect(() => {
+    if (overtimeTrigger === 0) return; // skip initial render
+    if (currentQuarter < 4) return;
+    const { ourScore, rivalScore } = getCurrentScores();
+    if (ourScore === rivalScore) {
+      setActiveModal('overtime');
+    }
+  }, [overtimeTrigger, currentQuarter, getCurrentScores]);
 
   // ============================================
   // VALORES CALCULADOS (MEMOIZADOS)
@@ -580,6 +649,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
 
   const ourTeamName = isHomeTeam ? homeTeam : awayTeam;
   const rivalTeamName = isHomeTeam ? awayTeam : homeTeam;
+  // Short names for scoreboard (fallback to full name)
+  const homeTeamDisplay = homeTeamShort || homeTeam;
+  const awayTeamDisplay = awayTeamShort || awayTeam;
 
   const teamPositions = useMemo(() =>
     [...new Set(effectivePlayers.map(p => p.position).filter(p => p && p !== 'Unselected'))],
@@ -705,9 +777,14 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const getCurrentPartialScores = useCallback(() => {
     const { ourScore, rivalScore } = getCurrentScores();
     const result = {};
+    const maxQ = Math.max(currentQuarter, ...Object.keys(partialScores).map(Number));
 
-    for (let q = 1; q <= 4; q++) {
+    for (let q = 1; q <= maxQ; q++) {
       const qScores = partialScores[q];
+      if (!qScores) {
+        result[q] = { first: { us: 0, them: 0 }, second: { us: 0, them: 0 } };
+        continue;
+      }
 
       if (q < currentQuarter) {
         result[q] = {
@@ -720,7 +797,13 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         const quarterUs = ourScore - prevUs;
         const quarterThem = rivalScore - prevThem;
 
-        if (qScores.first.locked) {
+        if (isOvertime(q)) {
+          // OT: everything in "first", no split
+          result[q] = {
+            first: { us: quarterUs, them: quarterThem },
+            second: { us: 0, them: 0 }
+          };
+        } else if (qScores.first.locked) {
           result[q] = {
             first: { us: qScores.first.us, them: qScores.first.them },
             second: { us: quarterUs - qScores.first.us, them: quarterThem - qScores.first.them }
@@ -749,16 +832,19 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       key: getQuintetKey(playerIds),
       playerIds: [...playerIds],
       startTime: Date.now(),
+      startGameTime: gameTime,
       startOurScore: ourScore,
       startRivalScore: rivalScore,
       quarter: currentQuarter
     });
-  }, [currentQuarter]);
+  }, [currentQuarter, gameTime]);
 
   const endCurrentQuintet = useCallback((ourScore, rivalScore) => {
     setCurrentQuintet(prev => {
       if (prev) {
-        const duration = (Date.now() - prev.startTime) / 1000 / 60;
+        // Use game clock difference (countdown), not real time
+        const durationSeconds = (prev.startGameTime ?? getQuarterDuration(prev.quarter || 1)) - gameTime;
+        const duration = Math.max(0, durationSeconds) / 60; // convert to minutes
         setQuintetHistory(h => [...h, {
           ...prev,
           endTime: Date.now(),
@@ -770,23 +856,58 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       }
       return null;
     });
-  }, []);
+  }, [gameTime]);
 
   // Snapshot quintet when quarter auto-advances
+  // Uses quarterEndGameTimeRef (captured at 0) instead of endCurrentQuintet's stale gameTime (already 600)
   useEffect(() => {
     if (quarterAdvancedRef.current) {
       quarterAdvancedRef.current = false;
       const { ourScore, rivalScore } = getCurrentScores();
       if (currentQuintet) {
-        endCurrentQuintet(ourScore, rivalScore);
+        // Close quintet with the correct gameTime (0, captured before reset to 600)
+        const endGameTime = quarterEndGameTimeRef.current;
+        setCurrentQuintet(prev => {
+          if (prev) {
+            const durationSeconds = (prev.startGameTime ?? getQuarterDuration(prev.quarter || 1)) - endGameTime;
+            const duration = Math.max(0, durationSeconds) / 60;
+            setQuintetHistory(h => [...h, {
+              ...prev,
+              endTime: Date.now(),
+              duration,
+              pointsScored: ourScore - prev.startOurScore,
+              pointsAllowed: rivalScore - prev.startRivalScore,
+              differential: (ourScore - prev.startOurScore) - (rivalScore - prev.startRivalScore)
+            }]);
+          }
+          return null;
+        });
         // Restart quintet with same players for the new quarter
         const onCourt = players.filter(p => p.onCourt);
         if (onCourt.length === 5) {
           startNewQuintet(onCourt.map(p => p.id), ourScore, rivalScore);
         }
       }
+
+      // Halftime (Q2→Q3): split stints for players on court
+      // They had a ~10min rest, so the stint shouldn't count as continuous
+      if (currentQuarter === 3) {
+        setPlayers(prev => prev.map(p => {
+          if (!p.onCourt || p.currentMinutes <= 0) return p;
+          const stintPM = p.currentStintStart
+            ? (ourScore - p.currentStintStart.ourScore) - (rivalScore - p.currentStintStart.rivalScore)
+            : 0;
+          return {
+            ...p,
+            stints: [...p.stints, p.currentMinutes],
+            stintPlusMinus: [...p.stintPlusMinus, stintPM],
+            currentMinutes: 0,
+            currentStintStart: { ourScore, rivalScore }
+          };
+        }));
+      }
     }
-  }, [currentQuarter, currentQuintet, getCurrentScores, endCurrentQuintet, startNewQuintet, players]);
+  }, [currentQuarter, currentQuintet, getCurrentScores, startNewQuintet, players]);
 
   const updateGameFlow = useCallback((newOurScore, newRivalScore) => {
     const { ourScore, rivalScore } = getCurrentScores();
@@ -814,7 +935,6 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     // Pausar cronómetro al hacer cambios
     setGameRunning(false);
 
-    const now = Date.now();
     const { ourScore, rivalScore } = getCurrentScores();
 
     if (currentOnCourtCount === 5) {
@@ -835,7 +955,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         stintPlusMinus: [...player.stintPlusMinus],
         currentStintStart: player.currentStintStart
       },
-      scoreAtAction: { ourScore, rivalScore }
+      scoreAtAction: { ourScore, rivalScore },
+      previousQuintetState: currentQuintet ? { ...currentQuintet } : null,
+      previousQuintetHistoryLength: quintetHistory.length
     }]);
 
     setSubstitutionsByQuarter(prev => ({
@@ -851,7 +973,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               ? (ourScore - p.currentStintStart.ourScore) - (rivalScore - p.currentStintStart.rivalScore)
               : 0;
             setRotationHistory(h => [...h, {
-              time: `Q${currentQuarter}`,
+              time: getQuarterLabel(currentQuarter),
               type: 'OUT',
               player: `#${p.number} ${p.name}`
             }]);
@@ -859,14 +981,14 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               ...p,
               onCourt: false,
               currentMinutes: 0,
-              lastToggle: gameRunning ? now : null,
+              lastToggle: gameRunning ? true : null,
               stints: [...p.stints, p.currentMinutes],
               stintPlusMinus: [...p.stintPlusMinus, stintPM],
               currentStintStart: null
             };
           } else {
             setRotationHistory(h => [...h, {
-              time: `Q${currentQuarter}`,
+              time: getQuarterLabel(currentQuarter),
               type: 'IN',
               player: `#${p.number} ${p.name}`
             }]);
@@ -874,7 +996,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               ...p,
               onCourt: true,
               currentMinutes: 0,
-              lastToggle: gameRunning ? now : null,
+              lastToggle: gameRunning ? true : null,
               currentStintStart: { ourScore, rivalScore }
             };
           }
@@ -891,9 +1013,12 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
 
     // Show replacement modal when going from 5 to 4 on court
     if (player.onCourt && currentOnCourtCount === 5) {
-      setPendingReplacement({ outPlayer: { id: player.id, name: player.name, number: player.number, position: player.position } });
+      setPendingReplacement({
+        outPlayer: { id: player.id, name: player.name, number: player.number, position: player.position },
+        previousQuintet: currentQuintet // save for SKIP undo
+      });
     }
-  }, [players, getCurrentScores, endCurrentQuintet, startNewQuintet, currentQuarter, gameRunning]);
+  }, [players, getCurrentScores, endCurrentQuintet, startNewQuintet, currentQuarter, gameRunning, currentQuintet, quintetHistory]);
 
   const toggleGameRunning = useCallback(() => {
     const currentOnCourtCount = players.filter(p => p.onCourt).length;
@@ -905,7 +1030,12 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     const { ourScore, rivalScore } = getCurrentScores();
 
     if (!gameRunning) {
-      setPlayers(prev => prev.map(p => ({ ...p, lastToggle: Date.now() })));
+      // Start timer for ALL players — bench time must be tracked from game start.
+      // Urgency colors for never-played bench players are handled in getBenchTimeStatus.
+      setPlayers(prev => prev.map(p => ({
+        ...p,
+        lastToggle: p.lastToggle || true
+      })));
       const onCourt = players.filter(p => p.onCourt);
       if (onCourt.length === 5 && !currentQuintet) {
         startNewQuintet(onCourt.map(p => p.id), ourScore, rivalScore);
@@ -940,12 +1070,19 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       type: 'foul',
       playerId,
       delta,
+      quarter: currentQuarter,
       previousFouls: player.fouls,
       wasOnCourt: player.onCourt,
       previousPlayerState,
-      scoreAtAction: { ourScore, rivalScore }
+      scoreAtAction: { ourScore, rivalScore },
+      previousQuintetState: (newFouls >= 5 && player.onCourt) ? (currentQuintet ? { ...currentQuintet } : null) : undefined,
+      previousQuintetHistoryLength: (newFouls >= 5 && player.onCourt) ? quintetHistory.length : undefined
     }]);
     if (delta > 0) {
+      setTeamFoulsByQuarter(prev => ({
+        ...prev,
+        [currentQuarter]: { ...prev[currentQuarter], us: prev[currentQuarter].us + delta }
+      }));
       setEventLog(prev => [...prev, {
         timestamp: Date.now(),
         gameTime,
@@ -958,6 +1095,12 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         playType: null,
         lineupOnCourt: players.filter(p => p.onCourt).map(p => p.id)
       }]);
+    } else if (delta < 0) {
+      // Foul correction: decrement team fouls too
+      setTeamFoulsByQuarter(prev => ({
+        ...prev,
+        [currentQuarter]: { ...prev[currentQuarter], us: Math.max(0, prev[currentQuarter].us + delta) }
+      }));
     }
 
     if (newFouls >= 5 && player.onCourt) {
@@ -973,7 +1116,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
             fouls: newFouls,
             onCourt: false,
             currentMinutes: 0,
-            lastToggle: gameRunning ? Date.now() : null,
+            lastToggle: gameRunning ? true : null,
             stints: [...p.stints, p.currentMinutes],
             stintPlusMinus: [...p.stintPlusMinus, stintPM],
             currentStintStart: null
@@ -983,7 +1126,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       }));
 
       setRotationHistory(h => [...h, {
-        time: `Q${currentQuarter}`,
+        time: getQuarterLabel(currentQuarter),
         type: 'FOULED OUT',
         player: `#${player.number} ${player.name}`
       }]);
@@ -993,12 +1136,76 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     } else {
       setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, fouls: newFouls } : p));
     }
-  }, [players, getCurrentScores, endCurrentQuintet, currentQuarter, gameRunning, gameTime, isHomeTeam]);
+  }, [players, getCurrentScores, endCurrentQuintet, currentQuarter, gameRunning, gameTime, isHomeTeam, currentQuintet, quintetHistory]);
 
   const addFoulToPlayer = useCallback((playerId) => {
     adjustFouls(playerId, 1);
     setActiveModal(null);
   }, [adjustFouls]);
+
+  const addRivalFoul = useCallback(() => {
+    setTeamFoulsByQuarter(prev => ({
+      ...prev,
+      [currentQuarter]: { ...prev[currentQuarter], them: prev[currentQuarter].them + 1 }
+    }));
+    setActionHistory(prev => [...prev, {
+      type: 'rivalFoul',
+      quarter: currentQuarter
+    }]);
+    setEventLog(prev => [...prev, {
+      timestamp: Date.now(),
+      gameTime,
+      quarter: currentQuarter,
+      type: 'foul',
+      team: isHomeTeam ? 'away' : 'home',
+      playerId: null,
+      assistById: null,
+      value: 1,
+      playType: null,
+      lineupOnCourt: players.filter(p => p.onCourt).map(p => p.id)
+    }]);
+    setActiveModal(null);
+  }, [currentQuarter, gameTime, isHomeTeam, players]);
+
+  const addRivalFreeThrows = useCallback((madeCount) => {
+    const missedCount = rivalFreeThrowCount - madeCount;
+    const { ourScore, rivalScore } = getCurrentScores();
+
+    if (madeCount > 0) {
+      updateGameFlow(ourScore, rivalScore + madeCount);
+      if (isHomeTeam) setAwayScore(prev => prev + madeCount);
+      else setHomeScore(prev => prev + madeCount);
+      setScoresByQuarter(prev => ({
+        ...prev,
+        [currentQuarter]: { ...prev[currentQuarter], them: prev[currentQuarter].them + madeCount }
+      }));
+    }
+
+    // EventLog entries
+    const lineupOnCourt = players.filter(p => p.onCourt).map(p => p.id);
+    const now = Date.now();
+    const newEvents = [];
+    for (let i = 0; i < madeCount; i++) {
+      newEvents.push({ timestamp: now, gameTime, quarter: currentQuarter, type: 'score', subtype: 'made', team: isHomeTeam ? 'away' : 'home', playerId: null, value: 1, playType: 'freeThrow', lineupOnCourt });
+    }
+    for (let i = 0; i < missedCount; i++) {
+      newEvents.push({ timestamp: now, gameTime, quarter: currentQuarter, type: 'miss', team: isHomeTeam ? 'away' : 'home', playerId: null, value: 1, playType: 'freeThrow', lineupOnCourt });
+    }
+    setEventLog(prev => [...prev, ...newEvents]);
+
+    setActionHistory(prev => [...prev, {
+      type: 'rivalFreeThrow',
+      madeCount,
+      missedCount,
+      freeThrowCount: rivalFreeThrowCount,
+      quarter: currentQuarter,
+      previousGameFlow: madeCount > 0 ? { leadChanges, ties, biggestLead: { ...biggestLead } } : null
+    }]);
+
+    setActiveModal(null);
+    setSelectedPoints(null);
+    setRivalFreeThrowCount(null);
+  }, [rivalFreeThrowCount, getCurrentScores, updateGameFlow, isHomeTeam, currentQuarter, gameTime, players, leadChanges, ties, biggestLead]);
 
   const undoLastAction = useCallback(() => {
     if (actionHistory.length === 0) return;
@@ -1061,6 +1268,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         setRotationHistory(prev => prev.slice(0, -1));
         setFouledOutPlayer(null);
         setActiveModal(null);
+        // Restore quintet state from before fouled out
+        if (lastAction.previousQuintetHistoryLength !== undefined) {
+          setQuintetHistory(prev => prev.slice(0, lastAction.previousQuintetHistoryLength));
+        }
+        setCurrentQuintet(lastAction.previousQuintetState || null);
       }
     } else if (lastAction.type === 'substitution') {
       const actionQuarter = lastAction.quarter || currentQuarter;
@@ -1074,6 +1286,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         ...prev,
         [actionQuarter]: Math.max(0, prev[actionQuarter] - 1)
       }));
+      // Restore quintet state
+      if (lastAction.previousQuintetHistoryLength !== undefined) {
+        setQuintetHistory(prev => prev.slice(0, lastAction.previousQuintetHistoryLength));
+      }
+      setCurrentQuintet(lastAction.previousQuintetState || null);
     } else if (lastAction.type === 'swap') {
       const actionQuarter = lastAction.quarter || currentQuarter;
       setPlayers(prev => prev.map(p => {
@@ -1086,6 +1303,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         ...prev,
         [actionQuarter]: Math.max(0, prev[actionQuarter] - 2)
       }));
+      // Restore quintet state
+      if (lastAction.previousQuintetHistoryLength !== undefined) {
+        setQuintetHistory(prev => prev.slice(0, lastAction.previousQuintetHistoryLength));
+      }
+      setCurrentQuintet(lastAction.previousQuintetState || null);
     } else if (lastAction.type === 'miss') {
       const shotKey = lastAction.points ? `pts${lastAction.points}` : null;
       setPlayers(prev => prev.map(p =>
@@ -1140,15 +1362,56 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       setEventLog(prev => prev.slice(0, -totalEvents));
     }
 
+    // Undo rival foul: decrement rival team fouls for that quarter
+    if (lastAction.type === 'rivalFoul') {
+      const q = lastAction.quarter || currentQuarter;
+      setTeamFoulsByQuarter(prev => ({
+        ...prev,
+        [q]: { ...prev[q], them: Math.max(0, prev[q].them - 1) }
+      }));
+      setEventLog(prev => prev.slice(0, -1));
+    }
+
+    // Undo rival free throws
+    if (lastAction.type === 'rivalFreeThrow') {
+      if (lastAction.madeCount > 0) {
+        if (isHomeTeam) setAwayScore(prev => prev - lastAction.madeCount);
+        else setHomeScore(prev => prev - lastAction.madeCount);
+        const q = lastAction.quarter || currentQuarter;
+        setScoresByQuarter(prev => ({
+          ...prev,
+          [q]: { ...prev[q], them: prev[q].them - lastAction.madeCount }
+        }));
+      }
+      const totalEvents = lastAction.madeCount + lastAction.missedCount;
+      setEventLog(prev => prev.slice(0, -totalEvents));
+    }
+
     // Undo rival miss: just remove the eventLog entry
     if (lastAction.type === 'rivalMiss') {
       setEventLog(prev => prev.slice(0, -1));
     }
 
+    // Undo team fouls for our player foul actions
+    if (lastAction.type === 'foul' && lastAction.delta > 0) {
+      const q = lastAction.quarter || currentQuarter;
+      setTeamFoulsByQuarter(prev => ({
+        ...prev,
+        [q]: { ...prev[q], us: Math.max(0, prev[q].us - lastAction.delta) }
+      }));
+    }
+
     // Remove corresponding eventLog entry for score/foul actions
-    // Note: 'miss', 'freeThrow', and 'rivalMiss' eventLog removal is handled in their own cases above
+    // Note: 'miss', 'freeThrow', 'rivalMiss', 'rivalFoul', 'rivalFreeThrow' eventLog removal is handled above
     if (lastAction.type === 'score' || (lastAction.type === 'foul' && lastAction.delta > 0)) {
       setEventLog(prev => prev.slice(0, -1));
+    }
+
+    // Restore gameFlow state (leadChanges, ties, biggestLead) if saved
+    if (lastAction.previousGameFlow) {
+      setLeadChanges(lastAction.previousGameFlow.leadChanges);
+      setTies(lastAction.previousGameFlow.ties);
+      setBiggestLead(lastAction.previousGameFlow.biggestLead);
     }
 
     setActionHistory(prev => prev.slice(0, -1));
@@ -1174,6 +1437,62 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     clearTimeout(longPressTimer.current);
   }, []);
 
+  // ============================================
+  // OVERTIME
+  // ============================================
+  const startOvertime = useCallback(() => {
+    const newQ = currentQuarter + 1;
+    const { ourScore, rivalScore } = getCurrentScores();
+
+    // 1. Close current quintet
+    if (currentQuintet) {
+      endCurrentQuintet(ourScore, rivalScore);
+    }
+
+    // 2. Split stints for on-court players (OT break = rest period)
+    setPlayers(prev => prev.map(p => {
+      if (!p.onCourt || p.currentMinutes <= 0) return p;
+      const stintPM = p.currentStintStart
+        ? (ourScore - p.currentStintStart.ourScore) - (rivalScore - p.currentStintStart.rivalScore)
+        : 0;
+      return {
+        ...p,
+        stints: [...p.stints, p.currentMinutes],
+        stintPlusMinus: [...p.stintPlusMinus, stintPM],
+        currentMinutes: 0,
+        currentStintStart: { ourScore, rivalScore }
+      };
+    }));
+
+    // 3. Initialize data structures for new OT period
+    setScoresByQuarter(prev => ({ ...prev, [newQ]: { us: 0, them: 0 } }));
+    setTeamFoulsByQuarter(prev => ({ ...prev, [newQ]: { us: 0, them: 0 } }));
+    setSubstitutionsByQuarter(prev => ({ ...prev, [newQ]: 0 }));
+    setPartialScores(prev => ({ ...prev, [newQ]: createPartialEntry() }));
+
+    // 4. Advance quarter and set timer (5 min for OT)
+    setCurrentQuarter(newQ);
+    setGameTime(getQuarterDuration(newQ));
+
+    // 5. Start new quintet with correct startGameTime for OT
+    const onCourt = players.filter(p => p.onCourt);
+    if (onCourt.length === 5) {
+      const playerIds = onCourt.map(p => p.id);
+      setCurrentQuintet({
+        key: getQuintetKey(playerIds),
+        playerIds: [...playerIds],
+        startTime: Date.now(),
+        startGameTime: getQuarterDuration(newQ),
+        startOurScore: ourScore,
+        startRivalScore: rivalScore,
+        quarter: newQ
+      });
+    }
+
+    // 6. Close modal
+    setActiveModal(null);
+  }, [currentQuarter, getCurrentScores, currentQuintet, endCurrentQuintet, players]);
+
   const confirmReset = useCallback(() => {
     // Resetear todos los estados
     setPlayers(effectivePlayers.map(createInitialPlayerState));
@@ -1184,6 +1503,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setRotationHistory([]);
     setHomeTeam(t.home);
     setAwayTeam(t.away);
+    setHomeTeamShort(null);
+    setAwayTeamShort(null);
     // Note: confirmReset goes back to team-selection, so teamName auto-fill not needed here
     setHomeScore(0);
     setAwayScore(0);
@@ -1201,11 +1522,13 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setBiggestLead({ us: 0, them: 0 });
     setPartialScores(createInitialPartialScores());
     setEventLog([]);
+    setTeamFoulsByQuarter({ 1: { us: 0, them: 0 }, 2: { us: 0, them: 0 }, 3: { us: 0, them: 0 }, 4: { us: 0, them: 0 } });
     // Reset UI states
     setCourtExpanded(false);
     setBenchExpanded(false);
     setShowFouls(false);
     setFreeThrowCount(null);
+    setRivalFreeThrowCount(null);
     setExpandedCrossPosition({});
     setRivalScoringStep(null);
     setSelectedPoints(null);
@@ -1277,7 +1600,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       playerId,
       points: selectedPoints,
       isOurTeam: true,
-      quarter: currentQuarter
+      quarter: currentQuarter,
+      previousGameFlow: { leadChanges, ties, biggestLead: { ...biggestLead } }
     }]);
     setEventLog(prev => [...prev, {
       timestamp: Date.now(),
@@ -1320,7 +1644,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setSelectedPoints(null);
     setSelectedScorePlayer(null);
     setRivalScoringStep(null);
-  }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter, gameTime, players]);
+  }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter, gameTime, players, leadChanges, ties, biggestLead]);
 
   const addRivalPoints = useCallback(() => {
     const { ourScore, rivalScore } = getCurrentScores();
@@ -1331,7 +1655,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       playerId: null,
       points: selectedPoints,
       isOurTeam: false,
-      quarter: currentQuarter
+      quarter: currentQuarter,
+      previousGameFlow: { leadChanges, ties, biggestLead: { ...biggestLead } }
     }]);
     setEventLog(prev => [...prev, {
       timestamp: Date.now(),
@@ -1361,7 +1686,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setSelectedPoints(null);
     setSelectedScorePlayer(null);
     setRivalScoringStep(null);
-  }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter, gameTime, players]);
+  }, [getCurrentScores, updateGameFlow, selectedPoints, isHomeTeam, currentQuarter, gameTime, players, leadChanges, ties, biggestLead]);
 
   const addRivalMiss = useCallback(() => {
     setEventLog(prev => [...prev, {
@@ -1478,14 +1803,15 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       madeCount,
       missedCount,
       freeThrowCount,
-      quarter: currentQuarter
+      quarter: currentQuarter,
+      previousGameFlow: madeCount > 0 ? { leadChanges, ties, biggestLead: { ...biggestLead } } : null
     }]);
 
     setActiveModal(null);
     setSelectedPoints(null);
     setSelectedScorePlayer(null);
     setFreeThrowCount(null);
-  }, [freeThrowCount, getCurrentScores, updateGameFlow, isHomeTeam, currentQuarter, gameTime, players]);
+  }, [freeThrowCount, getCurrentScores, updateGameFlow, isHomeTeam, currentQuarter, gameTime, players, leadChanges, ties, biggestLead]);
 
   // Cancel all scoring flow (resets every scoring-related state)
   const cancelScoring = useCallback(() => {
@@ -1493,8 +1819,32 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     setSelectedPoints(null);
     setSelectedScorePlayer(null);
     setFreeThrowCount(null);
+    setRivalFreeThrowCount(null);
     setRivalScoringStep(null);
   }, []);
+
+  // Direct score edit (tap on score): sync scoresByQuarter with the delta
+  const handleDirectScoreEdit = useCallback((team, newScore) => {
+    const parsedScore = parseInt(newScore) || 0;
+    const isOurTeam = (team === 'home' && isHomeTeam) || (team === 'away' && !isHomeTeam);
+    const oldScore = team === 'home' ? homeScore : awayScore;
+    const delta = parsedScore - oldScore;
+
+    if (team === 'home') setHomeScore(parsedScore);
+    else setAwayScore(parsedScore);
+
+    if (delta !== 0) {
+      const key = isOurTeam ? 'us' : 'them';
+      setScoresByQuarter(prev => ({
+        ...prev,
+        [currentQuarter]: {
+          ...prev[currentQuarter],
+          [key]: prev[currentQuarter][key] + delta
+        }
+      }));
+    }
+    setEditingScore(null);
+  }, [isHomeTeam, homeScore, awayScore, currentQuarter]);
 
   const executeSub = useCallback((outId, inId) => {
     const outPlayer = players.find(p => p.id === outId);
@@ -1504,7 +1854,6 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     // Pausar cronómetro al hacer cambios
     setGameRunning(false);
 
-    const now = Date.now();
     const { ourScore, rivalScore } = getCurrentScores();
     endCurrentQuintet(ourScore, rivalScore);
 
@@ -1531,7 +1880,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
         stintPlusMinus: [...inPlayer.stintPlusMinus],
         currentStintStart: inPlayer.currentStintStart
       },
-      scoreAtAction: { ourScore, rivalScore }
+      scoreAtAction: { ourScore, rivalScore },
+      previousQuintetState: currentQuintet ? { ...currentQuintet } : null,
+      previousQuintetHistoryLength: quintetHistory.length
     }]);
     setSubstitutionsByQuarter(prev => ({
       ...prev,
@@ -1548,7 +1899,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
             ...p,
             onCourt: false,
             currentMinutes: 0,
-            lastToggle: gameRunning ? now : null,
+            lastToggle: gameRunning ? true : null,
             stints: [...p.stints, p.currentMinutes],
             stintPlusMinus: [...p.stintPlusMinus, stintPM],
             currentStintStart: null
@@ -1559,7 +1910,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
             ...p,
             onCourt: true,
             currentMinutes: 0,
-            lastToggle: gameRunning ? now : null,
+            lastToggle: gameRunning ? true : null,
             currentStintStart: { ourScore, rivalScore }
           };
         }
@@ -1574,10 +1925,10 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
     });
 
     setRotationHistory(h => [...h,
-      { time: `Q${currentQuarter}`, type: 'OUT', player: `#${outPlayer.number} ${outPlayer.name}` },
-      { time: `Q${currentQuarter}`, type: 'IN', player: `#${inPlayer.number} ${inPlayer.name}` }
+      { time: getQuarterLabel(currentQuarter), type: 'OUT', player: `#${outPlayer.number} ${outPlayer.name}` },
+      { time: getQuarterLabel(currentQuarter), type: 'IN', player: `#${inPlayer.number} ${inPlayer.name}` }
     ]);
-  }, [players, getCurrentScores, endCurrentQuintet, startNewQuintet, currentQuarter, gameRunning]);
+  }, [players, getCurrentScores, endCurrentQuintet, startNewQuintet, currentQuarter, gameRunning, currentQuintet, quintetHistory]);
 
   const subInPlayer = useCallback((playerId) => {
     toggleCourt(playerId);
@@ -1610,30 +1961,32 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const generateReport = useCallback(() => {
     const { ourScore, rivalScore } = getCurrentScores();
 
-    // If there's an active quintet, calculate its stats inline for the report without ending it
-    let reportQuintetHistory = quintetHistory;
-    if (currentQuintet) {
-      const duration = (Date.now() - currentQuintet.startTime) / 1000 / 60;
-      const activeQuintetEntry = {
-        ...currentQuintet,
-        endTime: Date.now(),
-        duration,
-        pointsScored: ourScore - currentQuintet.startOurScore,
-        pointsAllowed: rivalScore - currentQuintet.startRivalScore,
-        differential: (ourScore - currentQuintet.startOurScore) - (rivalScore - currentQuintet.startRivalScore)
-      };
-      reportQuintetHistory = [...quintetHistory, activeQuintetEntry];
-    }
-
-    generateReportHTML({ ourScore, rivalScore, ourTeamName, rivalTeamName, players, quintetHistory: reportQuintetHistory, substitutionsByQuarter });
-  }, [getCurrentScores, currentQuintet, players, quintetHistory, substitutionsByQuarter, ourTeamName, rivalTeamName]);
+    generateReportHTML({
+      players,
+      quintetHistory,
+      currentQuintet,
+      eventLog,
+      partialScores,
+      scoresByQuarter,
+      substitutionsByQuarter,
+      ourScore,
+      rivalScore,
+      ourTeamName,
+      rivalTeamName,
+      isHomeTeam,
+      gameTime,
+      leadChanges,
+      ties,
+      biggestLead
+    });
+  }, [getCurrentScores, currentQuintet, players, quintetHistory, eventLog, partialScores, scoresByQuarter, substitutionsByQuarter, ourTeamName, rivalTeamName, isHomeTeam, leadChanges, ties, biggestLead]);
 
   // Helper para renderizar razón de recomendación
   const renderReason = (reason) => {
     if (!reason) return '';
     switch (reason.type) {
-      case 'foulsDanger': return t.foulsDanger(reason.fouls, reason.quarter);
-      case 'foulsWarning': return t.foulsWarning(reason.fouls, reason.quarter);
+      case 'foulsDanger': return t.foulsDanger(reason.fouls, getQuarterLabel(reason.quarter));
+      case 'foulsWarning': return t.foulsWarning(reason.fouls, getQuarterLabel(reason.quarter));
       case 'rest': return t.restReason(reason.time);
       default: return '';
     }
@@ -1737,12 +2090,24 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                 value={setupRivalName}
                 onChange={(e) => setSetupRivalName(e.target.value)}
                 placeholder={setupIsHome ? t.awayDefault : t.homeDefault}
-                className="w-full bg-slate-900 text-white px-4 py-3 rounded-xl text-center text-lg font-bold mb-6 border-2 border-slate-600 focus:border-orange-500 outline-none"
+                className="w-full bg-slate-900 text-white px-4 py-3 rounded-xl text-center text-lg font-bold mb-3 border-2 border-slate-600 focus:border-orange-500 outline-none"
                 autoFocus
               />
+              {setupRivalName.trim().length > 12 && (
+                <>
+                  <label className="block text-xs text-slate-400 text-center mb-1">{t.rivalShortName}</label>
+                  <input
+                    type="text"
+                    value={setupRivalShortName}
+                    onChange={(e) => setSetupRivalShortName(e.target.value)}
+                    placeholder={t.rivalShortNamePlaceholder}
+                    className="w-full bg-slate-900 text-white px-4 py-2 rounded-xl text-center text-sm font-bold mb-3 border border-slate-600 focus:border-orange-500 outline-none"
+                  />
+                </>
+              )}
               <button
                 onClick={() => setSetupStep(4)}
-                className="w-full min-h-[56px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-lg"
+                className="w-full min-h-[56px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-lg mt-3"
               >
                 {t.ok}
               </button>
@@ -1772,9 +2137,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                   // Determine team names
                   const rivalName = setupRivalName.trim() || (setupIsHome ? t.awayDefault : t.homeDefault);
                   const ourName = teamName || (setupIsHome ? t.homeDefault : t.awayDefault);
+                  const ourShort = teamShortName || null;
+                  const rivalShort = setupRivalShortName.trim() || null;
 
                   // Create the game with colors
-                  createNewGameWithColors(setupIsHome, setupOurColor, finalRivalColor, ourName, rivalName);
+                  createNewGameWithColors(setupIsHome, setupOurColor, finalRivalColor, ourName, rivalName, ourShort, rivalShort);
                 }}
                 className="w-full min-h-[56px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-lg"
               >
@@ -1819,6 +2186,11 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
   const awayColor = isHomeTeam ? rivalColor : ourColor;
 
   const hasFoulWarnings = warningPlayers.length > 0 || dangerPlayers.length > 0;
+
+  // Show in-app report (mid-game or post-game)
+  if (showReport) {
+    return <GameReport gameData={getFullGameState()} onBack={() => setShowReport(false)} />;
+  }
 
   return (
     <>
@@ -1876,7 +2248,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
         <div className="bg-slate-800 rounded-xl p-4 border-2 border-amber-500 max-w-sm w-full modal-content">
           <h3 className="text-lg font-black mb-3 text-amber-400 text-center">{t.whoFouled}</h3>
-          <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="grid grid-cols-2 gap-2 mb-2">
             {onCourtPlayers.map(player => (
               <button key={player.id} onClick={() => addFoulToPlayer(player.id)} className="bg-amber-700 active:bg-amber-600 rounded-lg min-h-[48px] p-3 font-bold text-left">
                 <div className="flex justify-between items-center">
@@ -1886,6 +2258,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               </button>
             ))}
           </div>
+          <button onClick={addRivalFoul} className={`w-full min-h-[48px] ${rivalColor.bg} active:opacity-80 rounded-lg font-bold mb-2 ${rivalColor.id === 'white' ? 'text-slate-800' : ''}`}>
+            {rivalTeamName}
+          </button>
           <button onClick={() => setActiveModal(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
         </div>
       </div>
@@ -1991,12 +2366,15 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
             <div className="text-xs font-bold text-orange-400 mb-1">{ourTeamName}</div>
             <div className="grid grid-cols-2 gap-2">
               {onCourtPlayers.map(player => (
-                <button key={player.id} onClick={() => { setSelectedScorePlayer({ id: player.id, name: player.name, number: player.number }); setActiveModal('freeThrowCount'); }} className="bg-orange-500 active:bg-orange-400 rounded-lg min-h-[48px] p-2 font-bold text-sm">
+                <button key={player.id} onClick={() => { setSelectedScorePlayer({ id: player.id, name: player.name, number: player.number }); setActiveModal('freeThrowCount'); }} className={`${ourColor.bg} active:opacity-80 rounded-lg min-h-[48px] p-2 font-bold text-sm ${ourColor.id === 'white' ? 'text-slate-800' : ''}`}>
                   #{player.number} {player.name}
                 </button>
               ))}
             </div>
           </div>
+          <button onClick={() => { setActiveModal('rivalFreeThrowCount'); }} className={`w-full min-h-[48px] ${rivalColor.bg} active:opacity-80 rounded-lg font-bold mb-2 ${rivalColor.id === 'white' ? 'text-slate-800' : ''}`}>
+            {rivalTeamName} FT
+          </button>
           <button onClick={cancelScoring} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.cancel}</button>
         </div>
       </div>
@@ -2027,6 +2405,60 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
       </div>
     )}
 
+    {/* Rival Free Throw flow — Step 1: How many Free Throws? */}
+    {activeModal === 'rivalFreeThrowCount' && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-emerald-500 max-w-sm w-full modal-content">
+          <h3 className="text-lg font-black mb-1 text-center" style={{color: rivalColor.id === 'white' ? '#94a3b8' : undefined}}>
+            <span className={rivalColor.text}>{rivalTeamName}</span>
+          </h3>
+          <p className="text-center text-slate-400 text-sm mb-4">{t.howManyFT}</p>
+          <div className="flex gap-3 mb-3">
+            {[1, 2, 3].map(n => (
+              <button
+                key={n}
+                onClick={() => { setRivalFreeThrowCount(n); setActiveModal('rivalFreeThrowMade'); }}
+                className="flex-1 min-h-[64px] bg-emerald-500 active:bg-emerald-400 rounded-xl font-black text-2xl flex items-center justify-center"
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => { setActiveModal('freeThrowPlayer'); setRivalFreeThrowCount(null); }} className="flex-1 min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+            <button onClick={cancelScoring} className="flex-1 min-h-[44px] bg-slate-700 rounded-lg font-bold text-slate-400">{t.cancel}</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Rival Free Throw flow — Step 2: How many made? */}
+    {activeModal === 'rivalFreeThrowMade' && rivalFreeThrowCount && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-emerald-500 max-w-sm w-full modal-content">
+          <h3 className="text-lg font-black mb-1 text-center" style={{color: rivalColor.id === 'white' ? '#94a3b8' : undefined}}>
+            <span className={rivalColor.text}>{rivalTeamName}</span>
+          </h3>
+          <p className="text-center text-slate-400 text-sm mb-4">{t.howManyMade} ({rivalFreeThrowCount} FT)</p>
+          <div className="flex gap-3 mb-3">
+            {Array.from({ length: rivalFreeThrowCount + 1 }, (_, i) => i).map(n => (
+              <button
+                key={n}
+                onClick={() => addRivalFreeThrows(n)}
+                className="flex-1 min-h-[64px] bg-slate-500 active:bg-slate-400 rounded-xl font-black text-2xl flex items-center justify-center"
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => { setActiveModal('rivalFreeThrowCount'); setRivalFreeThrowCount(null); }} className="flex-1 min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.back}</button>
+            <button onClick={cancelScoring} className="flex-1 min-h-[44px] bg-slate-700 rounded-lg font-bold text-slate-400">{t.cancel}</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {/* Replacement modal — when removing player with 5 on court */}
     {pendingReplacement && (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
@@ -2036,7 +2468,7 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
           <div className="grid grid-cols-2 gap-2 mb-3 max-h-[50vh] overflow-y-auto">
             {(() => {
               const outPos = pendingReplacement.outPlayer.position;
-              const bench = players.filter(p => !p.onCourt && p.position !== 'Unselected' && p.fouls < 5);
+              const bench = players.filter(p => !p.onCourt && p.position !== 'Unselected' && p.fouls < 5 && p.id !== pendingReplacement.outPlayer.id);
               const samePos = bench.filter(p => p.position === outPos);
               const secondaryPos = bench.filter(p => p.position !== outPos && (p.secondary_positions || []).includes(outPos));
               const rest = bench.filter(p => p.position !== outPos && !(p.secondary_positions || []).includes(outPos));
@@ -2054,12 +2486,36 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               ));
             })()}
           </div>
-          <button onClick={() => setPendingReplacement(null)} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.skip}</button>
+          <button onClick={() => {
+            undoLastAction();
+            // Restore quintet that was ended when the player was taken off court
+            if (pendingReplacement.previousQuintet) {
+              setQuintetHistory(prev => prev.slice(0, -1));
+              setCurrentQuintet(pendingReplacement.previousQuintet);
+            }
+            setPendingReplacement(null);
+          }} className="w-full min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.skip}</button>
         </div>
       </div>
     )}
 
     {/* Reset modal */}
+    {/* Overtime confirmation modal */}
+    {activeModal === 'overtime' && (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
+        <div className="bg-slate-800 rounded-xl p-4 border-2 border-orange-500 max-w-xs w-full modal-content">
+          <h3 className="text-lg font-black mb-2 text-orange-400 text-center">
+            {getQuarterLabel(currentQuarter)} — {t.overtimeConfirmTitle}
+          </h3>
+          <p className="text-center text-slate-300 mb-4">{t.overtimeConfirmText}</p>
+          <div className="flex gap-2">
+            <button onClick={startOvertime} className="flex-1 min-h-[44px] bg-emerald-600 rounded-lg font-bold">{t.overtimeYes}</button>
+            <button onClick={() => setActiveModal(null)} className="flex-1 min-h-[44px] bg-slate-600 rounded-lg font-bold">{t.overtimeNo}</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {activeModal === 'reset' && (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 modal-overlay">
         <div className="bg-slate-800 rounded-xl p-4 border-2 border-red-500 max-w-xs w-full modal-content">
@@ -2140,29 +2596,35 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
           <div className="bg-slate-800 rounded-lg p-2 sm:p-3 border border-slate-700">
             {/* Score */}
             <div className="grid grid-cols-3 gap-2 mb-2">
-              <div className={`${isHomeTeam ? `${homeColor.bgDark} ${homeColor.border}` : `${homeColor.bgDark}/50 ${homeColor.borderMuted}`} border-2 rounded-lg p-2 text-center`}>
+              {/* Home team score */}
+              <div className={`relative ${isHomeTeam ? `${homeColor.bgDark} ${homeColor.border}` : `${homeColor.bgDark}/50 ${homeColor.borderMuted}`} border-2 rounded-lg p-2 text-center`}>
                 {editingTeam === 'home' ? (
                   <input type="text" defaultValue={homeTeam} onBlur={(e) => { setHomeTeam(e.target.value || t.home); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeTeam(e.target.value || t.home); setEditingTeam(null); }}} className="bg-slate-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
                 ) : (
-                  <div className={`text-xs sm:text-sm ${homeColor.text} truncate cursor-pointer py-1`} onClick={() => setEditingTeam('home')}>{homeTeam}</div>
+                  <div className={`text-xs sm:text-sm ${homeColor.text} truncate cursor-pointer py-1`} onClick={() => setEditingTeam('home')}>{homeTeamDisplay}</div>
                 )}
                 {editingScore === 'home' ? (
-                  <input type="number" min="0" defaultValue={homeScore} onBlur={(e) => { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setHomeScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />
+                  <input type="number" min="0" defaultValue={homeScore} onBlur={(e) => handleDirectScoreEdit('home', e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />
                 ) : (
                   <div className="text-3xl sm:text-4xl md:text-5xl font-black cursor-pointer" onClick={() => setEditingScore('home')}>{homeScore}</div>
                 )}
+                {/* Home team fouls badge */}
+                <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black bg-slate-700 ${(teamFoulsByQuarter[currentQuarter]?.[isHomeTeam ? 'us' : 'them'] || 0) >= 4 ? 'ring-2 ring-red-500 bg-red-900/80' : 'border border-slate-500'}`}>
+                  {teamFoulsByQuarter[currentQuarter]?.[isHomeTeam ? 'us' : 'them'] || 0}
+                </div>
               </div>
+              {/* Center: Quarter + Timer */}
               <div className="flex flex-col items-center justify-center">
-                <div onClick={() => setShowQuarterSelector(!showQuarterSelector)} className="text-sm font-bold text-orange-400 cursor-pointer">Q{currentQuarter}</div>
+                <div onClick={() => setShowQuarterSelector(!showQuarterSelector)} className="text-sm font-bold text-orange-400 cursor-pointer">{getQuarterLabel(currentQuarter)}</div>
                 {editingGameTime ? (
                   <div className="flex flex-col items-center gap-2">
                     <div className="flex items-center gap-1">
-                      <input type="number" min="0" max="10" value={editGameTimeForm.minutes} onChange={(e) => setEditGameTimeForm({...editGameTimeForm, minutes: parseInt(e.target.value) || 0})} className="w-12 sm:w-14 bg-slate-900 px-2 py-2 rounded text-center font-black text-white text-lg" autoFocus />
+                      <input type="number" min="0" max={isOvertime(currentQuarter) ? 5 : 10} value={editGameTimeForm.minutes} onChange={(e) => setEditGameTimeForm({...editGameTimeForm, minutes: parseInt(e.target.value) || 0})} className="w-12 sm:w-14 bg-slate-900 px-2 py-2 rounded text-center font-black text-white text-lg" autoFocus />
                       <span className="font-black text-xl">:</span>
                       <input type="number" min="0" max="59" value={editGameTimeForm.seconds} onChange={(e) => setEditGameTimeForm({...editGameTimeForm, seconds: Math.min(59, parseInt(e.target.value) || 0)})} className="w-12 sm:w-14 bg-slate-900 px-2 py-2 rounded text-center font-black text-white text-lg" />
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { setGameTime(Math.max(0, Math.min(600, (editGameTimeForm.minutes * 60) + editGameTimeForm.seconds))); setEditingGameTime(false); }} className="bg-emerald-600 px-4 py-2 rounded text-sm font-bold active:bg-emerald-500">✓</button>
+                      <button onClick={() => { setGameTime(Math.max(0, Math.min(getQuarterDuration(currentQuarter), (editGameTimeForm.minutes * 60) + editGameTimeForm.seconds))); setEditingGameTime(false); }} className="bg-emerald-600 px-4 py-2 rounded text-sm font-bold active:bg-emerald-500">✓</button>
                       <button onClick={() => setEditingGameTime(false)} className="bg-red-600 px-4 py-2 rounded text-sm font-bold active:bg-red-500">✗</button>
                     </div>
                   </div>
@@ -2173,23 +2635,28 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                 )}
                 {showQuarterSelector && (
                   <div className="absolute mt-16 bg-slate-800 rounded-lg shadow-xl z-20 p-1.5 flex gap-1.5">
-                    {[1,2,3,4].map(q => (
-                      <button key={q} onClick={() => {setCurrentQuarter(q); setShowQuarterSelector(false);}} className={`min-w-[44px] min-h-[44px] rounded-lg text-sm font-bold flex items-center justify-center ${currentQuarter === q ? 'bg-orange-600' : 'bg-slate-700'}`}>{q}</button>
+                    {Array.from({length: currentQuarter}, (_, i) => i + 1).map(q => (
+                      <button key={q} onClick={() => {setCurrentQuarter(q); setShowQuarterSelector(false);}} className={`min-w-[44px] min-h-[44px] rounded-lg text-sm font-bold flex items-center justify-center ${currentQuarter === q ? 'bg-orange-600' : 'bg-slate-700'}`}>{getQuarterLabel(q)}</button>
                     ))}
                   </div>
                 )}
               </div>
-              <div className={`${!isHomeTeam ? `${awayColor.bgDark} ${awayColor.border}` : `${awayColor.bgDark}/50 ${awayColor.borderMuted}`} border-2 rounded-lg p-2 text-center`}>
+              {/* Away team score */}
+              <div className={`relative ${!isHomeTeam ? `${awayColor.bgDark} ${awayColor.border}` : `${awayColor.bgDark}/50 ${awayColor.borderMuted}`} border-2 rounded-lg p-2 text-center`}>
                 {editingTeam === 'away' ? (
                   <input type="text" defaultValue={awayTeam} onBlur={(e) => { setAwayTeam(e.target.value || t.away); setEditingTeam(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayTeam(e.target.value || t.away); setEditingTeam(null); }}} className="bg-slate-900 px-2 py-1.5 rounded text-center font-bold text-white w-full text-sm" autoFocus />
                 ) : (
-                  <div className={`text-xs sm:text-sm ${awayColor.text} truncate cursor-pointer py-1`} onClick={() => setEditingTeam('away')}>{awayTeam}</div>
+                  <div className={`text-xs sm:text-sm ${awayColor.text} truncate cursor-pointer py-1`} onClick={() => setEditingTeam('away')}>{awayTeamDisplay}</div>
                 )}
                 {editingScore === 'away' ? (
-                  <input type="number" min="0" defaultValue={awayScore} onBlur={(e) => { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }} onKeyDown={(e) => { if (e.key === 'Enter') { setAwayScore(parseInt(e.target.value) || 0); setEditingScore(null); }}} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />
+                  <input type="number" min="0" defaultValue={awayScore} onBlur={(e) => handleDirectScoreEdit('away', e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }} className="bg-slate-900 px-2 py-2 rounded text-center font-black text-white w-full text-3xl sm:text-4xl" autoFocus />
                 ) : (
                   <div className="text-3xl sm:text-4xl md:text-5xl font-black cursor-pointer" onClick={() => setEditingScore('away')}>{awayScore}</div>
                 )}
+                {/* Away team fouls badge */}
+                <div className={`absolute -top-2 -left-2 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black bg-slate-700 ${(teamFoulsByQuarter[currentQuarter]?.[isHomeTeam ? 'them' : 'us'] || 0) >= 4 ? 'ring-2 ring-red-500 bg-red-900/80' : 'border border-slate-500'}`}>
+                  {teamFoulsByQuarter[currentQuarter]?.[isHomeTeam ? 'them' : 'us'] || 0}
+                </div>
               </div>
             </div>
 
@@ -2208,9 +2675,9 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                 </div>
               </div>
               <div className="flex-1 grid grid-cols-4 grid-rows-[3fr_2fr] md:grid-rows-[2fr_1fr] gap-1.5">
-                <button onClick={() => { setSelectedPoints(3); setActiveModal('score'); setPendingReplacement(null); }} className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 active:bg-indigo-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts3}</button>
-                <button onClick={() => { setSelectedPoints(2); setActiveModal('score'); setPendingReplacement(null); }} className="bg-blue-500/20 text-blue-300 border border-blue-500/30 active:bg-blue-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts2}</button>
-                <button onClick={() => { setActiveModal('freeThrowPlayer'); setSelectedScorePlayer(null); setFreeThrowCount(null); setPendingReplacement(null); }} className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 active:bg-emerald-500/40 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts1}</button>
+                <button onClick={() => { setSelectedPoints(3); setActiveModal('score'); setPendingReplacement(null); }} className="text-indigo-300 border border-indigo-500/40 active:bg-indigo-500/20 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts3}</button>
+                <button onClick={() => { setSelectedPoints(2); setActiveModal('score'); setPendingReplacement(null); }} className="text-blue-300 border border-blue-500/40 active:bg-blue-500/20 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts2}</button>
+                <button onClick={() => { setActiveModal('freeThrowPlayer'); setSelectedScorePlayer(null); setFreeThrowCount(null); setPendingReplacement(null); }} className="text-emerald-300 border border-emerald-500/40 active:bg-emerald-500/20 rounded-lg font-black text-sm flex items-center justify-center min-h-[56px]">{t.pts1}</button>
                 <button onClick={() => { setActiveModal('foul'); setPendingReplacement(null); }} className="bg-amber-600 active:bg-amber-500 rounded-lg font-black text-lg flex items-center justify-center min-h-[56px]">
                   <Bell className="w-6 h-6" />
                 </button>
@@ -2227,8 +2694,8 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                 <button onClick={() => { setActiveModal('intervals'); setPendingReplacement(null); }} className="min-h-[44px] bg-slate-600 rounded-lg flex items-center justify-center">
                   <Settings className="w-4 h-4" />
                 </button>
-                <button onClick={generateReport} className="min-h-[44px] bg-blue-600 rounded-lg flex items-center justify-center">
-                  <Download className="w-4 h-4" />
+                <button onClick={() => setShowReport(true)} className="min-h-[44px] bg-blue-600 rounded-lg flex items-center justify-center">
+                  <BarChart3 className="w-4 h-4" />
                 </button>
                 <button onClick={() => { setActiveModal('exit'); setPendingReplacement(null); }} className="min-h-[44px] bg-orange-600 rounded-lg flex items-center justify-center">
                   <XCircle className="w-4 h-4" />
@@ -2249,11 +2716,14 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
               if (us < them) return 'bg-red-700 text-red-100';
               return 'bg-orange-600 text-orange-100';
             };
-            const currentHalf = gameTime > 300 ? 'first' : 'second';
+            const currentHalf = isOvertime(currentQuarter) ? 'first' : (gameTime > 300 ? 'first' : 'second');
+            const quarterKeys = Object.keys(partials).map(Number).sort((a, b) => a - b);
             return (
-              <div className="grid grid-cols-4 gap-1 mb-1">
-                {[1, 2, 3, 4].map(q => {
+              <div className="gap-1 mb-1" style={{ display: 'grid', gridTemplateColumns: `repeat(${quarterKeys.length}, 1fr)` }}>
+                {quarterKeys.map(q => {
                   const qPartials = partials[q];
+                  if (!qPartials) return null;
+                  const isOT = isOvertime(q);
                   const firstColor = getPartialColor(qPartials.first.us, qPartials.first.them);
                   const secondColor = getPartialColor(qPartials.second.us, qPartials.second.them);
                   const quarterUs = qPartials.first.us + qPartials.second.us;
@@ -2264,18 +2734,29 @@ export default function BasketballRotationTracker({ initialPlayers, onExit, onGa
                   const isSecondHalfCurrent = isCurrentQ && currentHalf === 'second';
                   return (
                     <div key={q} className="rounded p-1">
-                      <div className="text-xs text-center text-slate-400 font-bold mb-0.5">Q{q}</div>
-                      <div className="flex gap-0.5">
-                        <div className={`flex-1 ${firstColor} rounded px-1 py-0.5 text-center ${isFirstHalfCurrent ? 'ring-2 ring-orange-400' : ''}`}>
+                      <div className="text-xs text-center text-slate-400 font-bold mb-0.5">{getQuarterLabel(q)}</div>
+                      {isOT ? (
+                        /* OT periods: single cell (5 min, no split) */
+                        <div className={`${firstColor} rounded px-1 py-0.5 text-center ${isFirstHalfCurrent ? 'ring-2 ring-orange-400' : ''}`}>
                           <span className="text-xs font-bold">{qPartials.first.us}-{qPartials.first.them}</span>
                         </div>
-                        <div className={`flex-1 ${secondColor} rounded px-1 py-0.5 text-center ${isSecondHalfCurrent ? 'ring-2 ring-orange-400' : ''}`}>
-                          <span className="text-xs font-bold">{qPartials.second.us}-{qPartials.second.them}</span>
+                      ) : (
+                        /* Regular quarters: two halves of 5 min */
+                        <div className="flex gap-0.5">
+                          <div className={`flex-1 ${firstColor} rounded px-1 py-0.5 text-center ${isFirstHalfCurrent ? 'ring-2 ring-orange-400' : ''}`}>
+                            <span className="text-xs font-bold">{qPartials.first.us}-{qPartials.first.them}</span>
+                          </div>
+                          <div className={`flex-1 ${secondColor} rounded px-1 py-0.5 text-center ${isSecondHalfCurrent ? 'ring-2 ring-orange-400' : ''}`}>
+                            <span className="text-xs font-bold">{qPartials.second.us}-{qPartials.second.them}</span>
+                          </div>
                         </div>
-                      </div>
-                      <div className={`${quarterColor} rounded px-1 py-0.5 text-center mt-0.5`}>
-                        <span className="text-xs font-black">{quarterUs}-{quarterThem}</span>
-                      </div>
+                      )}
+                      {/* Total row: skip for OT (single cell already shows the total) */}
+                      {!isOT && (
+                        <div className={`${quarterColor} rounded px-1 py-0.5 text-center mt-0.5`}>
+                          <span className="text-xs font-black">{quarterUs}-{quarterThem}</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

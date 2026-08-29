@@ -4,7 +4,7 @@ import { useTranslation } from '../context/LanguageContext';
 import { Plus, Trash2, Edit3, Check, X } from 'lucide-react';
 import { DEFAULT_POSITIONS, getPositionClasses } from '../lib/gameUtils';
 
-export default function PlayerRosterEditor({ teamPositions }) {
+export default function PlayerRosterEditor({ teamPositions, readOnly = false }) {
   const { teamPlayers, addPlayer, updatePlayer, deletePlayer } = useTeam();
   const { t } = useTranslation();
   const positions = teamPositions || DEFAULT_POSITIONS;
@@ -150,12 +150,12 @@ export default function PlayerRosterEditor({ teamPositions }) {
                       placeholder={t.name || 'Name'}
                     />
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <input
                       type="text"
                       value={editForm.number}
                       onChange={(e) => setEditForm({ ...editForm, number: e.target.value })}
-                      className="w-12 bg-slate-700 px-2 py-1 rounded text-sm text-white text-center"
+                      className="w-12 bg-slate-700 border border-slate-600 px-2 py-2 rounded text-sm text-white text-center"
                       placeholder="#"
                     />
                     <select
@@ -168,7 +168,8 @@ export default function PlayerRosterEditor({ teamPositions }) {
                           secondary_positions: editForm.secondary_positions.filter(p => p !== newPos)
                         });
                       }}
-                      className="bg-slate-700 px-2 py-1 rounded text-sm text-white"
+                      className="bg-slate-700 border border-slate-600 px-2 py-2 rounded text-sm text-white appearance-none"
+                      style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', paddingRight: '24px' }}
                     >
                       {renderPositionOptions()}
                     </select>
@@ -196,12 +197,16 @@ export default function PlayerRosterEditor({ teamPositions }) {
                       </span>
                     )}
                   </span>
-                  <button onClick={() => startEdit(player)} className="p-1 hover:bg-slate-700 rounded min-h-[44px] min-w-[44px] flex items-center justify-center">
-                    <Edit3 className="w-3.5 h-3.5 text-slate-400" />
-                  </button>
-                  <button onClick={() => handleDelete(player.id)} className="p-1 hover:bg-slate-700 rounded min-h-[44px] min-w-[44px] flex items-center justify-center">
-                    <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                  </button>
+                  {!readOnly && (
+                    <>
+                      <button onClick={() => startEdit(player)} className="p-1 hover:bg-slate-700 rounded min-h-[44px] min-w-[44px] flex items-center justify-center">
+                        <Edit3 className="w-3.5 h-3.5 text-slate-400" />
+                      </button>
+                      <button onClick={() => handleDelete(player.id)} className="p-1 hover:bg-slate-700 rounded min-h-[44px] min-w-[44px] flex items-center justify-center">
+                        <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -219,15 +224,15 @@ export default function PlayerRosterEditor({ teamPositions }) {
       })}
       {renderGroup(t.unselected, grouped.Unselected, 'text-slate-400')}
 
-      {/* Add player */}
-      {showAdd ? (
+      {/* Add player (hidden for viewers) */}
+      {readOnly ? null : showAdd ? (
         <form onSubmit={handleAdd} className="bg-slate-800 rounded-lg p-3 border border-emerald-500 mt-2">
-          <div className="flex items-center gap-1 mb-1">
+          <div className="flex items-center gap-1.5 mb-1.5">
             <input
               type="text"
               value={addForm.name}
               onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
-              className="flex-1 bg-slate-700 px-2 py-1.5 rounded text-sm text-white"
+              className="flex-1 bg-slate-700 border border-slate-600 px-2 py-2 rounded text-sm text-white min-w-0"
               placeholder={t.name || 'Name'}
               autoFocus
               required
@@ -236,7 +241,7 @@ export default function PlayerRosterEditor({ teamPositions }) {
               type="text"
               value={addForm.number}
               onChange={(e) => setAddForm({ ...addForm, number: e.target.value })}
-              className="w-14 bg-slate-700 px-2 py-1.5 rounded text-sm text-white text-center"
+              className="w-12 bg-slate-700 border border-slate-600 px-2 py-2 rounded text-sm text-white text-center flex-shrink-0"
               placeholder="#"
             />
             <select
@@ -249,7 +254,8 @@ export default function PlayerRosterEditor({ teamPositions }) {
                   secondary_positions: addForm.secondary_positions.filter(p => p !== newPos)
                 });
               }}
-              className="bg-slate-700 px-2 py-1.5 rounded text-sm text-white"
+              className="bg-slate-700 border border-slate-600 px-2 py-2 rounded text-sm text-white flex-shrink-0 appearance-none"
+              style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2394a3b8\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', paddingRight: '24px' }}
             >
               {renderPositionOptions()}
             </select>

@@ -2,11 +2,21 @@
 // FUNCIONES DE UTILIDAD DEL PARTIDO
 // ============================================
 
+// Overtime helpers
+export const getQuarterDuration = (quarter) => quarter <= 4 ? 600 : 300;
+export const getQuarterLabel = (quarter) => quarter <= 4 ? `Q${quarter}` : `P${quarter - 4}`;
+export const isOvertime = (quarter) => quarter > 4;
+
+export const createPartialEntry = () => ({
+  first: { us: 0, them: 0, locked: false },
+  second: { us: 0, them: 0, locked: false }
+});
+
 export const createInitialPartialScores = () => ({
-  1: { first: { us: 0, them: 0, locked: false }, second: { us: 0, them: 0, locked: false } },
-  2: { first: { us: 0, them: 0, locked: false }, second: { us: 0, them: 0, locked: false } },
-  3: { first: { us: 0, them: 0, locked: false }, second: { us: 0, them: 0, locked: false } },
-  4: { first: { us: 0, them: 0, locked: false }, second: { us: 0, them: 0, locked: false } }
+  1: createPartialEntry(),
+  2: createPartialEntry(),
+  3: createPartialEntry(),
+  4: createPartialEntry()
 });
 
 // Backward compatibility — prefer createInitialPartialScores() for fresh objects
@@ -51,12 +61,14 @@ export const getFoulStatus = (fouls, quarter) => {
   if (quarter === 1) return fouls === 0 ? 'safe' : fouls === 1 ? 'warning' : 'danger';
   if (quarter === 2) return fouls <= 1 ? 'safe' : fouls === 2 ? 'warning' : 'danger';
   if (quarter === 3) return fouls <= 2 ? 'safe' : fouls === 3 ? 'warning' : 'danger';
+  // Q4 and OT periods (quarter >= 4): same thresholds — fouls reset each period
   return fouls <= 2 ? 'safe' : fouls === 3 ? 'warning' : 'danger';
 };
 
 export const formatTime = (minutes) => {
-  const mins = Math.floor(minutes);
-  const secs = Math.floor((minutes % 1) * 60);
+  const safe = Math.max(0, minutes || 0);
+  const mins = Math.floor(safe);
+  const secs = Math.floor((safe % 1) * 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
@@ -77,7 +89,7 @@ export const getQuintetKey = (playerIds) => [...playerIds].sort().join('-');
 // ============================================
 // POSICIONES CONFIGURABLES
 // ============================================
-export const DEFAULT_POSITIONS = ['Base', 'Alero', 'Joker'];
+export const DEFAULT_POSITIONS = ['Position 1', 'Position 2', 'Position 3'];
 
 // Full Tailwind class maps for dynamic positions (explicit to avoid purge issues)
 const POSITION_COLOR_CLASSES = [

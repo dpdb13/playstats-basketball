@@ -1,16 +1,18 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { useTranslation } from '../context/LanguageContext';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Share2, Play, Eye, Trash2, Users, Wifi, WifiOff, Check, X, Camera, RotateCcw, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
+import { ArrowLeft, Share2, Play, Eye, Trash2, Users, Wifi, WifiOff, Check, X, Camera, RotateCcw, ChevronDown, ChevronUp, Edit3, BarChart3 } from 'lucide-react';
 import ShareTeamModal from './ShareTeamModal';
 import PlayerRosterEditor from './PlayerRosterEditor';
 import TeamIcon from './TeamIcon';
 import ImageCropper from './ImageCropper';
+import GameReport from './GameReport';
+import SeasonStats from './SeasonStats';
 import { getTeamPositions, getPositionClasses } from '../lib/gameUtils';
 
 export default function TeamDetail({ onStartGame, onContinueGame }) {
-  const { currentTeam, teamGames, teamPlayers, deselectTeam, deleteGame, online, deleteTeam, updateTeam, updateTeamSettings, uploadTeamAvatar, refreshCurrentTeam } = useTeam();
+  const { currentTeam, teamGames, teamPlayers, deselectTeam, deleteGame, softDeleteGame, restoreGame, online, deleteTeam, updateTeam, updateTeamSettings, uploadTeamAvatar, refreshCurrentTeam } = useTeam();
   const { t, language } = useTranslation();
   const [showShare, setShowShare] = useState(false);
   const [activeTab, setActiveTab] = useState('games');
@@ -21,6 +23,8 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
   // Edicion de nombre
   const [editingName, setEditingName] = useState(false);
   const [nameForm, setNameForm] = useState('');
+  const [editingShortName, setEditingShortName] = useState(false);
+  const [shortNameForm, setShortNameForm] = useState('');
 
   // Edicion de icono
   const [showIconEditor, setShowIconEditor] = useState(false);
@@ -35,19 +39,45 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
 
   // Collapsible game sections
   const inProgressGames = teamGames.filter(g => g.status === 'in_progress');
-  const completedGames = teamGames.filter(g => g.status !== 'in_progress');
+  const completedGames = teamGames.filter(g => g.status === 'completed');
+  const deletedGames = teamGames.filter(g => g.status === 'deleted');
   const [inProgressExpanded, setInProgressExpanded] = useState(inProgressGames.length > 0);
   const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [trashExpanded, setTrashExpanded] = useState(false);
+  const [gameToPermDelete, setGameToPermDelete] = useState(null);
+  const [reportGame, setReportGame] = useState(null);
 
   // Game metadata editing
   const [editingGameId, setEditingGameId] = useState(null);
   const [gameEditForm, setGameEditForm] = useState({ phase: '', matchday: '', date: '', time: '' });
   const [savingGameEdit, setSavingGameEdit] = useState(false);
 
+  // Handle back gesture when viewing report
+  useEffect(() => {
+    if (!reportGame) return;
+    const handlePopState = (e) => {
+      e.stopImmediatePropagation(); // Prevent App.jsx handler from also firing
+      setReportGame(null);
+      window.history.replaceState({ screen: 'teamDetail' }, '');
+    };
+    // Push one entry so back gesture has something to pop
+    window.history.pushState({ screen: 'report' }, '');
+    // capture: true ensures this fires BEFORE App.jsx's bubble-phase handler
+    window.addEventListener('popstate', handlePopState, true);
+    return () => window.removeEventListener('popstate', handlePopState, true);
+  }, [reportGame]);
+
   if (!currentTeam) return null;
+
+  // Show GameReport full-screen when a game is selected for report
+  if (reportGame) {
+    return <GameReport gameData={reportGame} onBack={() => window.history.back()} />;
+  }
 
   const teamPositions = getTeamPositions(currentTeam);
   const isOwner = currentTeam.role === 'owner';
+  const canEdit = currentTeam.role === 'owner' || currentTeam.role === 'editor';
+  const isViewer = currentTeam.role === 'viewer';
   const dateLocale = language === 'es' ? 'es-ES' : 'en-US';
 
   const handleDeleteGame = (gameId, e) => {
@@ -57,10 +87,28 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
 
   const confirmDeleteGame = () => {
     if (gameToDelete) {
-      deleteGame(gameToDelete);
+      softDeleteGame(gameToDelete);
       setGameToDelete(null);
       setSelectedFinishedGame(null);
     }
+  };
+
+  const confirmPermDeleteGame = () => {
+    if (gameToPermDelete) {
+      deleteGame(gameToPermDelete);
+      setGameToPermDelete(null);
+    }
+  };
+
+  const handleRestoreGame = (gameId) => {
+    restoreGame(gameId);
+  };
+
+  // Helper: days since deleted
+  const getDaysSinceDeleted = (game) => {
+    const deletedAt = game.game_data?.deleted_at;
+    if (!deletedAt) return 0;
+    return Math.floor((Date.now() - new Date(deletedAt).getTime()) / (1000 * 60 * 60 * 24));
   };
 
   const handleDeleteTeam = async () => {
@@ -108,6 +156,20 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
       await updateTeam(currentTeam.id, { name: trimmed });
     } catch { /* ignore */ }
     setEditingName(false);
+  };
+
+  const saveShortName = async () => {
+    const trimmed = shortNameForm.trim();
+    const currentShort = currentTeam.team_settings?.short_name || '';
+    if (trimmed === currentShort) {
+      setEditingShortName(false);
+      return;
+    }
+    try {
+      const settings = { ...(currentTeam.team_settings || {}), short_name: trimmed || null };
+      await updateTeamSettings(currentTeam.id, settings);
+    } catch { /* ignore */ }
+    setEditingShortName(false);
   };
 
   const saveEmoji = async () => {
@@ -221,38 +283,74 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
               <ArrowLeft className="w-5 h-5" />
             </button>
 
-            {/* Icono editable */}
-            <button
-              onClick={() => { setShowIconEditor(true); setEmojiInput(''); }}
-              className="hover:opacity-80 transition-opacity"
-              title={t.changeIcon}
-            >
-              <TeamIcon icon={currentTeam.icon} size="text-2xl" imgSize="w-9 h-9" />
-            </button>
-
-            {/* Nombre editable */}
-            {editingName ? (
-              <div className="flex items-center gap-1">
-                <input
-                  type="text"
-                  value={nameForm}
-                  onChange={(e) => setNameForm(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingName(false); }}
-                  className="bg-slate-700 border border-orange-500 rounded-lg px-2 py-1 text-white font-bold text-lg w-40 focus:outline-none"
-                  autoFocus
-                />
-                <button onClick={saveName} className="p-1 bg-emerald-600 rounded"><Check className="w-4 h-4" /></button>
-                <button onClick={() => setEditingName(false)} className="p-1 bg-slate-600 rounded"><X className="w-4 h-4" /></button>
-              </div>
-            ) : (
-              <h1
-                onClick={() => { setEditingName(true); setNameForm(currentTeam.name); }}
-                className="text-lg font-black text-orange-400 cursor-pointer hover:underline"
-                title={t.tapToEdit}
+            {/* Icono (editable solo para editores) */}
+            {canEdit ? (
+              <button
+                onClick={() => { setShowIconEditor(true); setEmojiInput(''); }}
+                className="hover:opacity-80 transition-opacity"
+                title={t.changeIcon}
               >
-                {currentTeam.name}
-              </h1>
+                <TeamIcon icon={currentTeam.icon} size="text-2xl" imgSize="w-9 h-9" />
+              </button>
+            ) : (
+              <TeamIcon icon={currentTeam.icon} size="text-2xl" imgSize="w-9 h-9" />
             )}
+
+            {/* Nombre (editable solo para editores) */}
+            <div className="min-w-0 flex-1">
+              {canEdit && editingName ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={nameForm}
+                    onChange={(e) => setNameForm(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingName(false); }}
+                    className="bg-slate-700 border border-orange-500 rounded-lg px-2 py-1 text-white font-bold text-lg w-40 focus:outline-none"
+                    autoFocus
+                  />
+                  <button onClick={saveName} className="p-1 bg-emerald-600 rounded"><Check className="w-4 h-4" /></button>
+                  <button onClick={() => setEditingName(false)} className="p-1 bg-slate-600 rounded"><X className="w-4 h-4" /></button>
+                </div>
+              ) : (
+                <h1
+                  onClick={canEdit ? () => { setEditingName(true); setNameForm(currentTeam.name); } : undefined}
+                  className={`text-lg font-black text-orange-400 truncate ${canEdit ? 'cursor-pointer hover:underline' : ''}`}
+                  title={canEdit ? t.tapToEdit : undefined}
+                >
+                  {currentTeam.name}
+                </h1>
+              )}
+              {/* Nombre corto (editable solo para editores) */}
+              {canEdit && editingShortName ? (
+                <div className="flex items-center gap-1 mt-0.5">
+                  <input
+                    type="text"
+                    value={shortNameForm}
+                    onChange={(e) => setShortNameForm(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveShortName(); if (e.key === 'Escape') setEditingShortName(false); }}
+                    className="bg-slate-700 border border-orange-500 rounded px-2 py-0.5 text-white text-xs w-32 focus:outline-none"
+                    placeholder={t.shortNamePlaceholder}
+                    autoFocus
+                  />
+                  <button onClick={saveShortName} className="p-0.5 bg-emerald-600 rounded"><Check className="w-3 h-3" /></button>
+                  <button onClick={() => setEditingShortName(false)} className="p-0.5 bg-slate-600 rounded"><X className="w-3 h-3" /></button>
+                </div>
+              ) : canEdit ? (
+                <button
+                  onClick={() => { setEditingShortName(true); setShortNameForm(currentTeam.team_settings?.short_name || ''); }}
+                  className="text-[11px] text-slate-500 hover:text-slate-300 mt-0.5 block"
+                >
+                  {currentTeam.team_settings?.short_name
+                    ? `${t.shortName}: ${currentTeam.team_settings.short_name}`
+                    : `+ ${t.shortName}`
+                  }
+                </button>
+              ) : currentTeam.team_settings?.short_name ? (
+                <span className="text-[11px] text-slate-500 mt-0.5 block">
+                  {t.shortName}: {currentTeam.team_settings.short_name}
+                </span>
+              ) : null}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -261,22 +359,34 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
             ) : (
               <WifiOff className="w-4 h-4 text-red-400" />
             )}
-            <button
-              onClick={() => setShowShare(true)}
-              className="p-2 bg-blue-600 hover:bg-blue-500 rounded-lg"
-            >
-              <Share2 className="w-5 h-5" />
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => setShowShare(true)}
+                className="p-2 bg-blue-600 hover:bg-blue-500 rounded-lg"
+              >
+                <Share2 className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Nuevo partido */}
-        <button
-          onClick={() => onStartGame()}
-          className="w-full mb-4 bg-orange-500 hover:bg-orange-400 active:bg-orange-300 rounded-xl p-3 border-2 border-orange-300 font-bold flex items-center justify-center gap-2 text-white"
-        >
-          <Play className="w-5 h-5" /> {t.newGameBtn}
-        </button>
+        {/* Viewer notice */}
+        {isViewer && (
+          <div className="bg-emerald-900/30 border border-emerald-600/30 rounded-lg p-3 mb-4 flex items-center gap-2">
+            <Eye className="w-4 h-4 text-emerald-400 shrink-0" />
+            <p className="text-xs text-emerald-300">{t.viewerNotice}</p>
+          </div>
+        )}
+
+        {/* Nuevo partido (solo editores) */}
+        {canEdit && (
+          <button
+            onClick={() => onStartGame()}
+            className="w-full mb-4 bg-orange-500 hover:bg-orange-400 active:bg-orange-300 rounded-xl p-3 border-2 border-orange-300 font-bold flex items-center justify-center gap-2 text-white"
+          >
+            <Play className="w-5 h-5" /> {t.newGameBtn}
+          </button>
+        )}
 
         {/* Tabs */}
         <div className="flex mb-4 bg-slate-800 rounded-lg p-1">
@@ -284,7 +394,7 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
             onClick={() => setActiveTab('games')}
             className={`flex-1 py-2 rounded-md font-bold text-sm transition-colors ${activeTab === 'games' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-white'}`}
           >
-            {t.games} ({teamGames.length})
+            {t.games} ({inProgressGames.length + completedGames.length})
           </button>
           <button
             onClick={() => setActiveTab('roster')}
@@ -292,10 +402,18 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
           >
             <Users className="w-4 h-4" /> {t.roster} ({teamPlayers.length})
           </button>
+          <button
+            onClick={() => setActiveTab('stats')}
+            className={`flex-1 py-2 rounded-md font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'stats' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-white'}`}
+          >
+            <BarChart3 className="w-4 h-4" /> {t.seasonStatsTab || 'Stats'}
+          </button>
         </div>
 
         {/* Contenido */}
-        {activeTab === 'games' ? (
+        {activeTab === 'stats' ? (
+          <SeasonStats teamId={currentTeam.id} teamPlayers={teamPlayers} canEdit={canEdit} />
+        ) : activeTab === 'games' ? (
           <div>
             {teamGames.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
@@ -389,7 +507,10 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
                               </div>
                             ) : (
                               /* Normal game card */
-                              <div className="bg-slate-800 rounded-xl p-4 border-2 border-amber-500">
+                              <div
+                                onClick={() => setSelectedFinishedGame(game)}
+                                className="bg-slate-800 rounded-xl p-4 border-2 border-amber-500 hover:border-amber-400 cursor-pointer transition-colors"
+                              >
                                 <div className="flex justify-between items-start mb-1">
                                   <div className="text-xs text-slate-400">
                                     {getGameDisplayDate(game)}
@@ -398,13 +519,15 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
                                     <div className="text-xs px-2 py-0.5 rounded font-bold bg-amber-600">
                                       {t.inProgress}
                                     </div>
-                                    <button
-                                      onClick={(e) => startEditGame(game, e)}
-                                      className="p-1 bg-slate-700 hover:bg-slate-600 rounded"
-                                      title={t.editGame}
-                                    >
-                                      <Edit3 className="w-3.5 h-3.5 text-slate-300" />
-                                    </button>
+                                    {canEdit && (
+                                      <button
+                                        onClick={(e) => startEditGame(game, e)}
+                                        className="p-1 bg-slate-700 hover:bg-slate-600 rounded"
+                                        title={t.editGame}
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5 text-slate-300" />
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                                 {renderGameMetaBadges(game)}
@@ -413,22 +536,8 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
                                   <span className="text-slate-500"> - </span>
                                   <span className="text-white font-black">{game.away_score}</span> <span className="text-slate-300">{game.away_team}</span>
                                 </div>
-                                <div className="text-xs text-slate-500 mb-3">
+                                <div className="text-xs text-slate-500">
                                   Q{game.current_quarter} {game.is_home_team ? `- ${t.home}` : `- ${t.away}`}
-                                </div>
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={() => onContinueGame(game)}
-                                    className="flex-1 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1"
-                                  >
-                                    <Play className="w-4 h-4" /> {t.continue}
-                                  </button>
-                                  <button
-                                    onClick={(e) => handleDeleteGame(game.id, e)}
-                                    className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg font-bold text-sm"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
                                 </div>
                               </div>
                             )}
@@ -451,8 +560,7 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
                     </h3>
                     {completedExpanded
                       ? <ChevronUp className="w-4 h-4 text-slate-400 group-hover:text-white" />
-                      : <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-white" />
-                    }
+                      : <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-white" />}
                   </button>
                   {completedExpanded && (
                     <div className="space-y-2 mt-1">
@@ -542,19 +650,23 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
                                   <div className={`text-xs px-2 py-0.5 rounded font-bold ${didWin ? 'bg-emerald-600' : didLose ? 'bg-red-600' : 'bg-slate-600'}`}>
                                     {didWin ? t.victory : didLose ? t.defeat : t.draw}
                                   </div>
-                                  <button
-                                    onClick={(e) => startEditGame(game, e)}
-                                    className="p-1 bg-slate-700 hover:bg-slate-600 rounded"
-                                    title={t.editGame}
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5 text-slate-300" />
-                                  </button>
-                                  <button
-                                    onClick={(e) => handleDeleteGame(game.id, e)}
-                                    className="p-1 bg-red-600/80 hover:bg-red-500 rounded"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
+                                  {canEdit && (
+                                    <>
+                                      <button
+                                        onClick={(e) => startEditGame(game, e)}
+                                        className="p-1 bg-slate-700 hover:bg-slate-600 rounded"
+                                        title={t.editGame}
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5 text-slate-300" />
+                                      </button>
+                                      <button
+                                        onClick={(e) => handleDeleteGame(game.id, e)}
+                                        className="p-1 bg-red-600/80 hover:bg-red-500 rounded"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                               {renderGameMetaBadges(game)}
@@ -583,13 +695,71 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
                     </div>
                   )}
                 </div>
+
+                {/* Seccion: Papelera (collapsible) */}
+                {deletedGames.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => setTrashExpanded(prev => !prev)}
+                      className="w-full flex items-center justify-between py-2 px-1 group"
+                    >
+                      <h3 className="text-sm font-bold text-slate-400 flex items-center gap-1.5">
+                        <Trash2 className="w-4 h-4" /> {t.trash}
+                        <span className="text-xs bg-slate-600 text-white px-1.5 py-0.5 rounded-full ml-1">{deletedGames.length}</span>
+                      </h3>
+                      {trashExpanded
+                        ? <ChevronUp className="w-4 h-4 text-slate-500 group-hover:text-white" />
+                        : <ChevronDown className="w-4 h-4 text-slate-500 group-hover:text-white" />
+                      }
+                    </button>
+                    {trashExpanded && (
+                      <div className="space-y-2 mt-1">
+                        <p className="text-[10px] text-slate-500 px-1">{t.autoDeleteWarning}</p>
+                        {deletedGames.map(game => {
+                          const days = getDaysSinceDeleted(game);
+                          return (
+                            <div key={game.id} className="bg-slate-800/50 rounded-xl p-3 border border-slate-700 opacity-70">
+                              <div className="flex justify-between items-start mb-1">
+                                <div className="text-xs text-slate-500">
+                                  {getGameDisplayDate(game)}
+                                </div>
+                                <span className="text-[10px] text-slate-500 bg-slate-700 px-1.5 py-0.5 rounded">
+                                  {t.deletedDaysAgo(days)}
+                                </span>
+                              </div>
+                              <div className="text-sm font-bold text-slate-400 mb-2">
+                                {game.home_team} {game.home_score} - {game.away_score} {game.away_team}
+                              </div>
+                              {canEdit && (
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => handleRestoreGame(game.id)}
+                                    className="flex-1 bg-emerald-700 hover:bg-emerald-600 py-1.5 rounded-lg font-bold text-sm flex items-center justify-center gap-1"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" /> {t.restore}
+                                  </button>
+                                  <button
+                                    onClick={() => setGameToPermDelete(game.id)}
+                                    className="flex-1 bg-red-900/50 hover:bg-red-800/50 border border-red-700 py-1.5 rounded-lg font-bold text-sm text-red-400 flex items-center justify-center gap-1"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" /> {t.delete}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
         ) : (
           <>
           {/* Position editor */}
-          {isOwner && (
+          {canEdit && (
             <div className="mb-4">
               {editingPositions ? (
                 <div className="bg-slate-800 rounded-lg p-3 border border-orange-500">
@@ -639,7 +809,7 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
               )}
             </div>
           )}
-          <PlayerRosterEditor teamPositions={teamPositions} />
+          <PlayerRosterEditor teamPositions={teamPositions} readOnly={isViewer} />
           </>
         )}
 
@@ -684,41 +854,56 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
                 <span className="text-slate-300 font-bold">{selectedFinishedGame.home_team}</span> {selectedFinishedGame.home_score} - {selectedFinishedGame.away_score} <span className="text-slate-300 font-bold">{selectedFinishedGame.away_team}</span>
               </h3>
               <p className="text-xs text-slate-400 mb-4">
-                {new Date(getGameDisplayDate(selectedFinishedGame)).toLocaleDateString(dateLocale, {
-                  day: 'numeric', month: 'short', year: 'numeric',
-                  hour: '2-digit', minute: '2-digit'
-                })}
+                {getGameDisplayDate(selectedFinishedGame)}
               </p>
               <div className="space-y-2">
                 <button
                   onClick={() => {
-                    const game = selectedFinishedGame;
-                    setSelectedFinishedGame(null);
-                    onContinueGame(game);
-                  }}
-                  className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
-                >
-                  <Eye className="w-5 h-5" /> {t.view}
-                </button>
-                <button
-                  onClick={() => {
-                    const game = selectedFinishedGame;
-                    setSelectedFinishedGame(null);
-                    onContinueGame({ ...game, status: 'in_progress' });
-                  }}
-                  className="w-full bg-amber-600 hover:bg-amber-500 active:bg-amber-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
-                >
-                  <RotateCcw className="w-5 h-5" /> {t.resume}
-                </button>
-                <button
-                  onClick={() => {
-                    setGameToDelete(selectedFinishedGame.id);
+                    setReportGame(selectedFinishedGame);
                     setSelectedFinishedGame(null);
                   }}
-                  className="w-full bg-red-600 hover:bg-red-500 active:bg-red-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
+                  className="w-full bg-orange-600 hover:bg-orange-500 active:bg-orange-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
                 >
-                  <Trash2 className="w-5 h-5" /> {t.delete}
+                  <BarChart3 className="w-5 h-5" /> {t.gameReport || 'Game Report'}
                 </button>
+                {canEdit && (
+                  <>
+                    <button
+                      onClick={() => {
+                        const game = selectedFinishedGame;
+                        setSelectedFinishedGame(null);
+                        onContinueGame(game);
+                      }}
+                      className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
+                    >
+                      {selectedFinishedGame.status === 'in_progress'
+                        ? <><Play className="w-5 h-5" /> {t.continue}</>
+                        : <><Eye className="w-5 h-5" /> {t.view}</>
+                      }
+                    </button>
+                    {selectedFinishedGame.status === 'completed' && (
+                      <button
+                        onClick={() => {
+                          const game = selectedFinishedGame;
+                          setSelectedFinishedGame(null);
+                          onContinueGame({ ...game, status: 'in_progress' });
+                        }}
+                        className="w-full bg-amber-600 hover:bg-amber-500 active:bg-amber-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
+                      >
+                        <RotateCcw className="w-5 h-5" /> {t.resume}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setGameToDelete(selectedFinishedGame.id);
+                        setSelectedFinishedGame(null);
+                      }}
+                      className="w-full bg-red-600/80 hover:bg-red-500 active:bg-red-400 py-3 rounded-lg font-bold flex items-center justify-center gap-2"
+                    >
+                      <Trash2 className="w-5 h-5" /> {t.moveToTrash}
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={() => setSelectedFinishedGame(null)}
                   className="w-full bg-slate-600 hover:bg-slate-500 active:bg-slate-400 py-3 rounded-lg font-bold"
@@ -730,23 +915,49 @@ export default function TeamDetail({ onStartGame, onContinueGame }) {
           </div>
         )}
 
-        {/* Modal confirmar eliminar partido */}
+        {/* Modal confirmar mover a papelera */}
         {gameToDelete && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-800 rounded-xl p-5 border-2 border-red-500 max-w-sm md:max-w-md w-full">
-              <h3 className="text-lg font-black text-red-400 mb-3">{t.deleteGameTitle}</h3>
+            <div className="bg-slate-800 rounded-xl p-5 border-2 border-amber-500 max-w-sm md:max-w-md w-full">
+              <h3 className="text-lg font-black text-amber-400 mb-3">{t.moveToTrash}</h3>
               <p className="text-slate-300 text-sm mb-4">
-                {t.deleteGameMsg}
+                {t.moveToTrashMsg}
               </p>
               <div className="flex gap-2">
                 <button
                   onClick={confirmDeleteGame}
+                  className="flex-1 bg-amber-600 hover:bg-amber-500 py-2 rounded-lg font-bold"
+                >
+                  {t.moveToTrash}
+                </button>
+                <button
+                  onClick={() => setGameToDelete(null)}
+                  className="flex-1 bg-slate-600 hover:bg-slate-500 py-2 rounded-lg font-bold"
+                >
+                  {t.cancel}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal confirmar borrado permanente (desde papelera) */}
+        {gameToPermDelete && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+            <div className="bg-slate-800 rounded-xl p-5 border-2 border-red-500 max-w-sm md:max-w-md w-full">
+              <h3 className="text-lg font-black text-red-400 mb-3">{t.deletePermanently}</h3>
+              <p className="text-slate-300 text-sm mb-4">
+                {t.deleteGamePermanentMsg}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={confirmPermDeleteGame}
                   className="flex-1 bg-red-600 hover:bg-red-500 py-2 rounded-lg font-bold"
                 >
                   {t.yesDelete}
                 </button>
                 <button
-                  onClick={() => setGameToDelete(null)}
+                  onClick={() => setGameToPermDelete(null)}
                   className="flex-1 bg-slate-600 hover:bg-slate-500 py-2 rounded-lg font-bold"
                 >
                   {t.cancel}

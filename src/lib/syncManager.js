@@ -122,6 +122,13 @@ export async function processQueue() {
             updated_at: new Date().toISOString()
           });
         if (error) throw error;
+      } else if (op.type === 'update_game') {
+        const { id, ...updates } = op.data;
+        const { error } = await supabase
+          .from('games')
+          .update(updates)
+          .eq('id', id);
+        if (error) throw error;
       } else if (op.type === 'delete_game') {
         const { error } = await supabase
           .from('games')

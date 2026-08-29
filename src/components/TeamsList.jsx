@@ -5,15 +5,18 @@ import { useTranslation } from '../context/LanguageContext';
 import { Plus, LogOut, Wifi, WifiOff, X } from 'lucide-react';
 import PlayStatsIcon from './PlayStatsIcon';
 import TeamIcon from './TeamIcon';
-import { DEFAULT_POSITIONS, getPositionClasses } from '../lib/gameUtils';
+import { getPositionClasses } from '../lib/gameUtils';
+
+const getDefaultPositions = (prefix) => [`${prefix} 1`, `${prefix} 2`, `${prefix} 3`];
 
 export default function TeamsList() {
   const { signOut, user } = useAuth();
-  const { teams, loading, online, createTeam, joinTeam, selectTeam, getTeamByInviteCode } = useTeam();
+  const { teams, loading, online, createTeam, joinTeam, joinTeamAsViewer, selectTeam, getTeamByInviteCode, getTeamByViewerCode } = useTeam();
   const { t, language, toggleLanguage } = useTranslation();
   const [showCreate, setShowCreate] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
-  const [newTeamPositions, setNewTeamPositions] = useState([...DEFAULT_POSITIONS]);
+  const [newTeamShortName, setNewTeamShortName] = useState('');
+  const [newTeamPositions, setNewTeamPositions] = useState(() => getDefaultPositions(t.defaultPositionPrefix));
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [joinMessage, setJoinMessage] = useState('');
@@ -21,22 +24,28 @@ export default function TeamsList() {
   // Modal de invitacion
   const [inviteModal, setInviteModal] = useState(null); // { code, teamInfo, loading, joining }
 
-  // Detectar ?join=CODIGO en URL
+  // Detectar ?join=CODIGO o ?view=CODIGO en URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const joinCode = params.get('join');
+    const viewCode = params.get('view');
     if (joinCode && user) {
-      showInviteModal(joinCode);
+      showInviteModal(joinCode, 'editor');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (viewCode && user) {
+      showInviteModal(viewCode, 'viewer');
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [user]);
 
-  const showInviteModal = async (code) => {
-    setInviteModal({ code, teamInfo: null, loading: true, joining: false });
+  const showInviteModal = async (code, joinType = 'editor') => {
+    setInviteModal({ code, teamInfo: null, loading: true, joining: false, joinType });
     try {
-      const info = await getTeamByInviteCode(code);
+      const info = joinType === 'viewer'
+        ? await getTeamByViewerCode(code)
+        : await getTeamByInviteCode(code);
       if (info) {
-        setInviteModal({ code, teamInfo: info, loading: false, joining: false });
+        setInviteModal({ code, teamInfo: info, loading: false, joining: false, joinType });
       } else {
         setError(t.inviteCode);
         setInviteModal(null);
@@ -51,7 +60,11 @@ export default function TeamsList() {
     if (!inviteModal) return;
     setInviteModal(prev => ({ ...prev, joining: true }));
     try {
-      await joinTeam(inviteModal.code);
+      if (inviteModal.joinType === 'viewer') {
+        await joinTeamAsViewer(inviteModal.code);
+      } else {
+        await joinTeam(inviteModal.code);
+      }
       setJoinMessage(t.joinedSuccessfully);
       setInviteModal(null);
       setTimeout(() => setJoinMessage(''), 3000);
@@ -70,9 +83,10 @@ export default function TeamsList() {
     setCreating(true);
     setError('');
     try {
-      const team = await createTeam(newTeamName.trim(), '🏀', cleanedPositions);
+      const team = await createTeam(newTeamName.trim(), '🏀', cleanedPositions, newTeamShortName.trim() || null);
       setNewTeamName('');
-      setNewTeamPositions([...DEFAULT_POSITIONS]);
+      setNewTeamShortName('');
+      setNewTeamPositions(getDefaultPositions(t.defaultPositionPrefix));
       setShowCreate(false);
       if (team) selectTeam(team);
     } catch (err) {
@@ -162,7 +176,7 @@ export default function TeamsList() {
                   <div className="flex-1 min-w-0">
                     <div className="font-bold text-white truncate">{team.name}</div>
                     <div className="text-xs text-slate-400">
-                      {team.role === 'owner' ? t.owner : t.member}
+                      {team.role === 'owner' ? t.owner : team.role === 'viewer' ? t.viewer : t.editor}
                     </div>
                   </div>
                   <span className="text-slate-500">→</span>
@@ -184,6 +198,14 @@ export default function TeamsList() {
               placeholder={t.teamNamePlaceholder}
               autoFocus
               required
+            />
+            <label className="block text-sm font-bold text-slate-400 mb-2">{t.shortName}</label>
+            <input
+              type="text"
+              value={newTeamShortName}
+              onChange={(e) => setNewTeamShortName(e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white focus:border-orange-500 focus:outline-none mb-3"
+              placeholder={t.shortNamePlaceholder}
             />
             <label className="block text-sm font-bold text-slate-400 mb-2">{t.teamPositions}</label>
             <div className="space-y-1.5 mb-2">
@@ -229,7 +251,7 @@ export default function TeamsList() {
               </button>
               <button
                 type="button"
-                onClick={() => { setShowCreate(false); setNewTeamName(''); setNewTeamPositions([...DEFAULT_POSITIONS]); }}
+                onClick={() => { setShowCreate(false); setNewTeamName(''); setNewTeamShortName(''); setNewTeamPositions(getDefaultPositions(t.defaultPositionPrefix)); }}
                 className="flex-1 bg-slate-600 hover:bg-slate-500 py-2 rounded-lg font-bold"
               >
                 {t.cancel}
@@ -268,6 +290,9 @@ export default function TeamsList() {
                   <TeamIcon icon={inviteModal.teamInfo.icon} size="text-5xl" imgSize="w-16 h-16" className="mx-auto" />
                   <h4 className="text-xl font-bold text-white mt-3">{inviteModal.teamInfo.name}</h4>
                   <p className="text-sm text-slate-400 mt-1">{t.youveBeenInvited}</p>
+                  {inviteModal.joinType === 'viewer' && (
+                    <span className="inline-block mt-2 text-xs font-bold px-2 py-1 rounded bg-emerald-500/20 text-emerald-400">{t.viewOnly}</span>
+                  )}
                 </div>
 
                 <div className="flex gap-2 mt-4">

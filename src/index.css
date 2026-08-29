@@ -17,6 +17,16 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* Press effect on all interactive elements */
+button,
+[role="button"] {
+  transition: transform 100ms ease-out;
+}
+button:active,
+[role="button"]:active {
+  transform: scale(0.96);
+}
+
 /* Modal animations */
 .modal-overlay {
   animation: fadeIn 200ms ease-out;
