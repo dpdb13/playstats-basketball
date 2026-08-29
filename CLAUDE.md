@@ -35,10 +35,38 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - **Desplegada en:** https://dpdb13.github.io/playstats-basketball/
 - **Nombre oficial:** PlayStats Basketball
 - **Service Worker:** Auto-actualización implementada (detecta nueva versión y recarga automáticamente)
-- **Cache actual:** `basketball-rotation-v73`
+- **Cache actual:** `basketball-rotation-v86`
 - **Manifest:** `orientation: "any"` (permite horizontal y vertical)
 - **History API:** pushState/popstate para navegación nativa de back en iOS/Android
 - **Supabase schema:** Columna `team_settings JSONB` en tabla `teams` para posiciones configurables
+
+## Infraestructura Supabase — CAMBIÓ el 29 agosto 2026 (LEER ANTES DE TOCAR NADA)
+
+**PlayStats ya NO tiene proyecto Supabase propio. Vive dentro del proyecto de Pick & Cut.**
+
+- **Proyecto actual:** `ehlxgjeffarkgphoabiy` (llamado `pickcut` en el dashboard), esquema `public`
+- **Proyecto antiguo:** `nhkfflffufopqbzrlztm` (`BasketballApp`) — PAUSADO, se conserva como respaldo. Reactivable hasta **1 may 2027**. No borrar antes de esa fecha
+- **Convive con** las 3 tablas de Pick & Cut (`licenses`, `active_sessions`, `user_backups`). No hubo ni una colisión de nombres
+
+### Por qué se hizo
+El plan Free de Supabase solo permite **2 proyectos activos por persona** y se pausan solos **tras 1 semana de inactividad**. PlayStats llevaba pausada desde marzo. Se descartó pagar Pro (25$/mes). Se eligió Pick & Cut como destino (en vez del proyecto compartido de Lysto/Splitly) porque PlayStats se venderá como complemento de Pick & Cut: así el cliente usa **una sola cuenta para las dos apps**.
+
+### Consecuencias que hay que recordar
+- **`auth.users` es COMPARTIDA con Pick & Cut.** Cualquier cambio en auth afecta a los ~27 usuarios de Pick & Cut, que son reales y de pago. Extremar el cuidado
+- **Las cuentas de PlayStats se fusionaron con las de Pick & Cut por email.** Quien tenía las dos entra ahora con la contraseña de Pick & Cut
+- **`auto_confirm_email` NO se migró a propósito.** Hacía `UPDATE auth.users SET email_confirmed_at = now()` y habría desactivado la verificación de email para todo Pick & Cut (que tiene `mailer_autoconfirm: False`). **No reinstalarla nunca**
+- **`handle_new_user` sí está**, con trigger `on_auth_user_created` en `auth.users`. Cada registro de Pick & Cut crea también una fila en `profiles`
+- **Deuda pendiente:** los usuarios de Pick & Cut anteriores a la migración NO tienen fila en `profiles`. Resolver antes de vender el pack conjunto
+- Ya no se pausará sola: el proyecto de Pick & Cut tiene actividad constante por las licencias
+
+### Respaldo
+Copia completa (esquema + datos + mapa de cuentas) en `~/Desktop/Output Claude/playstats-backup-2026-08-29/`.
+
+### Trampas encontradas al migrar (si algún día se repite)
+- `pg_dump` 18 mete directivas `\restrict` que la API de Supabase no entiende → hay que quitarlas
+- El dump trae `CREATE SCHEMA public` → falla en un proyecto que ya existe
+- `ALTER DEFAULT PRIVILEGES` → "permission denied", hay que eliminarlos
+- El plan Free **no genera backups descargables**: para sacar los datos hubo que reactivar el proyecto, y para eso pausar otro
 
 ## Funcionalidades implementadas
 
