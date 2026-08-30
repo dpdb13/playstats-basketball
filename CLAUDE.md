@@ -35,7 +35,7 @@ App para gestionar rotaciones de jugadores de baloncesto durante un partido. Dis
 - **Desplegada en:** https://dpdb13.github.io/playstats-basketball/
 - **Nombre oficial:** PlayStats Basketball
 - **Service Worker:** Auto-actualización implementada (detecta nueva versión y recarga automáticamente)
-- **Cache actual:** `basketball-rotation-v86`
+- **Cache actual:** `basketball-rotation-v87`
 - **Manifest:** `orientation: "any"` (permite horizontal y vertical)
 - **History API:** pushState/popstate para navegación nativa de back en iOS/Android
 - **Supabase schema:** Columna `team_settings JSONB` en tabla `teams` para posiciones configurables
@@ -67,6 +67,7 @@ Copia completa (esquema + datos + mapa de cuentas) en `~/Desktop/Output Claude/p
 - El dump trae `CREATE SCHEMA public` → falla en un proyecto que ya existe
 - `ALTER DEFAULT PRIVILEGES` → "permission denied", hay que eliminarlos
 - El plan Free **no genera backups descargables**: para sacar los datos hubo que reactivar el proyecto, y para eso pausar otro
+- **`pg_dump --schema=public` NO se lleva el Storage.** Los buckets y sus políticas viven en el esquema `storage`, y los archivos ni siquiera están en la base de datos. Se perdió el logo del equipo (`teams.icon` guardaba una URL al bucket `team-avatars` del proyecto viejo). El bucket y sus 4 políticas se recrearon a mano el 29 ago 2026; el archivo hubo que volver a subirlo. **Si algún día se repite una migración: migrar también los objetos de Storage**
 
 ## Funcionalidades implementadas
 
